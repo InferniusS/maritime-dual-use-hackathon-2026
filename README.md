@@ -1,17 +1,22 @@
 # Maritime Dual Use Hackathon 2026
 
-Initial repository scaffold for the Maritime Dual Use Hackathon, October 16–18, 2026.
+Our team's repo for the Maritime Dual Use Hackathon on October 16-18 2026.
 
-- **Team:** Four people; names TBD.
-- **Track:** TBD.
-- **Prototype:** TBD.
+## Team
 
-No prototype code has been added yet.
+- Efe ([@InferniusS](https://github.com/InferniusS))
+- Hasan Onallah ([@HasanOnallah1](https://github.com/HasanOnallah1))
+- Teammate 3: TBD
+- Teammate 4: TBD
+
+## Project
+
+We haven't picked a track or project yet. There's no prototype code here yet.
 
 ## Getting started
 
-TBD — setup and run instructions will be added once the prototype is selected.
+We'll add setup and run instructions once we have a prototype.
 
-## AI use disclosure
+## AI use
 
-This initial repository scaffolding was generated with Codex before challenge implementation.
+Codex generated the initial README and .gitignore before challenge implementation.
