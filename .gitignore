@@ -1,0 +1,40 @@
+# Local environment files; keep a shareable example available.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python generated files.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Node.js dependencies and generated files.
+node_modules/
+.next/
+.nuxt/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and test output.
+build/
+dist/
+coverage/
+
+# macOS generated files.
+.DS_Store
+.AppleDouble
+._*
