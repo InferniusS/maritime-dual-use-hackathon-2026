@@ -1,4 +1,4 @@
-# Python software inventory
+# Project software inventory
 
 Verified on October 16, 2026. This records the Python environment prepared for the piping prototype. Versions, project source links, and license labels below come from the installed distributions' metadata. The Windows-only entry comes from the resolved wheel metadata because it is not installed on the Mac.
 
@@ -55,3 +55,15 @@ The virtual environment also contains pip 26.1.2, the package installer supplied
 License labels are an inventory of what the distributions declare. Full copyright and license notices remain in each installed distribution's `.dist-info` directory. Several packages include additional notices for bundled code. NumPy records the combined expression above. SciPy includes notices for components such as OpenBLAS, LAPACK, the GCC runtime, and libquadmath, with inclusion depending on the binary build. Plotly includes third-party license records, and fonttools includes `LICENSE.external`. Retain the applicable bundled notices when distributing their binaries or generated assets.
 
 This inventory does not claim that optional package extras or every bundled binary component were separately exercised. Update it from the installed metadata whenever the lock file changes, and repeat the setup check on the final demonstration laptop.
+
+## AutoCAD plugin build
+
+Added on October 17. The Mac has a local .NET 10.0.402 SDK for compiling the plugin. It does not install AutoCAD or change the Python environment. The target is `net10.0-windows` with x64 output for AutoCAD 2027 for Windows.
+
+The build uses Autodesk's [AutoCAD.NET 26.0.0 reference package](https://www.nuget.org/packages/AutoCAD.NET/26.0.0). Its Core and Model packages provide the remaining AutoCAD API references. These are compile references only. Autodesk assemblies are not included with our plugin. The installed AutoCAD application supplies them when the plugin loads.
+
+The project also references the Microsoft Windows Desktop framework. Windows targeting is enabled so the Mac can compile the DLL. Compiling it on the Mac does not test AutoCAD loading or drawing interactions. Those checks still need the Windows demo laptop.
+
+The Python service and AutoCAD communicate over local HTTP. They can use different processor architectures because they do not load each other's code. The actual AutoCAD installation on the Snapdragon laptop still needs testing. No IQ9 runtime or neural model dependency has been added.
+
+See the [plugin guide](../autocad-plugin/README.md) for loading the prebuilt DLL or rebuilding it.

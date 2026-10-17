@@ -2,33 +2,43 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status on October 17:** the Mac prototype can display real CAD geometry and run a local routing test on a joined pipe route. It can recover from an artificial detour in that route. A complete ship system and the final Snapdragon demo are still unfinished.
+**Current direction on October 17:** use the tool inside AutoCAD. The plugin connects the drawing to our existing Python routing code. The browser app is still available for testing and as a demo fallback. The plugin still needs a live check in AutoCAD on the event laptop.
 
-## See what we have now
+## Start with AutoCAD
+
+The [AutoCAD setup guide](autocad-plugin/README.md) has the full steps. The short version is:
+
+1. Download or clone this repo on the AutoCAD laptop.
+2. Install the Python environment and start the local service.
+3. Load `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` through `NETLOAD` in AutoCAD 2027 for Windows. Rebuilding from source is also supported.
+4. Run `MARITIMECAD` to select a pipe solid or block from the drawing. Choose a detected route and review the result inside AutoCAD.
+
+The Python service runs on the same laptop. You do not need to open the website or upload the drawing through a browser. AutoCAD sends a temporary DXF snapshot to the local service.
+
+`MARITIMEPREVIEW` and `MARITIMEOPTIMIZE` remain available for simple line and polyline tests. The new drawing workflow can also save a suggestion as a separate review centerline. It does not replace the original pipe solids.
+
+## What this iteration adds
+
+- Starts a real drawing test from a selected object in AutoCAD
+- Reuses the existing CAD importer and route search
+- Shows possible routes associated with that selected object
+- Sends a chosen route through the same checks used by the browser app
+- Returns a result for review in the drawing
+- Keeps the browser app and saved example available
+
+This builds on the previous iteration. That version could join compatible component ends into longer routes and test an artificial detour. The plugin changes how we use that work. It does not turn the search into a trained model or add whole ship optimization.
+
+## See the saved result without installing anything
 
 ![Current piping test](docs/images/current-model.jpg)
 
 For Murad and Krishna at the venue:
 
 1. Download this repo with **Code → Download ZIP** or clone it.
-2. Extract it and open [examples/real-cad-demo/report.html](examples/real-cad-demo/report.html) in your browser.
+2. Extract it and open [report.html](examples/real-cad-demo/report.html) in your browser.
 3. Rotate the saved 3D result and compare the original route with the suggestion. This works offline and does not need Python or CAD software.
 
-GitHub shows the screenshot above with the full CAD background. Download the HTML to explore the selected route and its 36 obstacle boxes. The report shows a saved calculation. Use the app below to change inputs and run the search again.
-
-The [team handoff](docs/team-handoff.md) explains the current result and what we should tackle next.
-
-## What this version does
-
-- Displays supported geometry from uploaded DXF files
-- Finds possible pipe runs and joins compatible component ends into longer routes
-- Checks a selected route against nearby obstacle boxes
-- Keeps the original connection end sections fixed when the user applies that assumption
-- Creates a labeled artificial detour so we can test whether the search repairs it
-- Runs eight example layouts including pressure pipes and gravity drains
-- Exports exact coordinates with a centerline DXF and an offline report
-
-The latest saved example comes from three components in the cooling drawing.
+The screenshot shows the full CAD background. The saved HTML shows one selected route and its 36 obstacle boxes. It contains a saved calculation. Use the plugin or browser app to run a new search.
 
 | Route | Length |
 | --- | ---: |
@@ -36,22 +46,13 @@ The latest saved example comes from three components in the cooling drawing.
 | Baseline with an artificial detour | 4179.25 mm |
 | Suggested replacement | 3728.30 mm |
 
-The search removes about 451 mm of the added detour. The untouched CAD baseline is still shorter. This is a recovery test rather than evidence that we improved the supplied design. It retains all 36 nearby obstacle boxes with an assumed 50 mm clearance.
+The search removes about 451 mm of the added detour. The untouched CAD baseline is still shorter. This is a recovery test rather than evidence that we improved the supplied design. It uses an assumed 50 mm clearance.
 
-**310 automated tests passed on the Mac.** The workflow and baseline restore were also checked in the browser. The units and rules remain editable prototype assumptions. Passing these checks does not establish official engineering compliance.
+The Python code passed 373 automated tests on the Mac. The new snapshot path also read the real cooling drawing and found the expected joined route. The units and rules remain editable prototype assumptions. Passing the implemented checks does not establish official engineering compliance.
 
-## Run the app
+## Start the Python service
 
-Use standard CPython 3.14.x. On a Snapdragon Windows laptop use the ARM64 build. The setup scripts create a separate environment for this project. Run these commands from the extracted repo folder.
-
-### Mac
-
-```sh
-bash scripts/setup_mac.sh
-.venv/bin/python scripts/run_web.py
-```
-
-Efe's Mac is already set up and only needs the second command. If Python is not found you can give the setup script its full path.
+Use standard CPython 3.14.x. On a Snapdragon Windows laptop use the ARM64 build for the Python service. The setup scripts create a separate environment for this project. Run these commands from the extracted repo folder.
 
 ### Windows
 
@@ -69,33 +70,44 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe scripts\run_web.py
 ```
 
-Open [http://127.0.0.1:8767/](http://127.0.0.1:8767/) on the same laptop. Keep the terminal running. That address points to your own computer so it will not connect to Efe's Mac from the venue.
+### Mac
 
-In **Check a route** choose **Open a layout file** and load [baseline.json](examples/real-cad-demo/baseline.json). Click **Check and improve route**. Repeat with [detour.json](examples/real-cad-demo/detour.json) to test the artificial detour. These saved inputs include the local route and obstacles so the full organizer drawing is not required for this test.
+```sh
+bash scripts/setup_mac.sh
+.venv/bin/python scripts/run_web.py
+```
 
-The Windows packages were checked for ARM64 availability. The actual setup and full workflow still need to be tested on the event laptop. Recreate the environment there instead of copying the Mac's `.venv`.
+Efe's Mac is already set up and only needs the second command. If Python is not found you can give the setup script its full path.
 
-## AutoCAD 2027 plug-in prototype
+Keep the terminal running. The plugin uses [http://127.0.0.1:8767/](http://127.0.0.1:8767/) on the same computer. That address will not connect to Efe's Mac from the venue. A browser is optional when using the plugin.
 
-A separate C# plug-in prototype is in [`autocad-plugin/`](autocad-plugin/README.md). Build it on the Windows laptop with the .NET 10 SDK and AutoCAD 2027 managed assemblies, then load the generated DLL with `NETLOAD`. `MARITIMEPREVIEW` shows the selected route as a temporary cyan overlay. `MARITIMEOPTIMIZE` sends the route and selected obstacle objects to the Python service running on the same laptop, then shows the suggested route as a temporary green overlay. Neither command changes the drawing. See the plug-in README for setup and limitations.
+The Windows packages were checked for ARM64 availability. The actual installation and AutoCAD workflow still need verification on the event laptop. Recreate the environment there instead of copying the Mac's `.venv`.
 
-## Use a full drawing
+## Browser fallback
 
-In **Explore real CAD** open a local DXF. Convert DWG files to DXF first. The browser app does not need AutoCAD or FreeCAD to run. The final result still needs comparison in the CAD software required for the challenge.
+Open [http://127.0.0.1:8767/](http://127.0.0.1:8767/) while the Python service is running.
 
-Original organizer files stay outside Git. Get those from [the organizer Drive folder](https://drive.google.com/drive/folders/18ESskQZ73e8eus2aQ8Cm-h57o3OF8fop) to inspect the full drawing. This repo includes the small saved routing example so everyone can reproduce our current test. See [the CAD guide](docs/cad-workflow.md) for conversion and import details.
+In **Check a route** choose **Open a layout file** and load [baseline.json](examples/real-cad-demo/baseline.json). Click **Check and improve route**. Repeat with [detour.json](examples/real-cad-demo/detour.json) to test the artificial detour. These inputs include the route and local obstacles. The full organizer drawing is not required.
+
+In **Explore real CAD** open a local DXF. Convert DWG files to DXF first. The browser app can display supported geometry and find possible pipe runs. It can prepare a local route test and export coordinates with a centerline DXF and an offline report. Eight example layouts also cover pressure pipes and gravity drains.
+
+The browser app does not need AutoCAD or FreeCAD to run. The plugin needs AutoCAD 2027 for Windows. It cannot run as a managed plugin in AutoCAD for Mac.
+
+Original organizer files stay outside Git. Get those from [the organizer Drive folder](https://drive.google.com/drive/folders/18ESskQZ73e8eus2aQ8Cm-h57o3OF8fop) to inspect the full drawing. See [the CAD guide](docs/cad-workflow.md) for conversion and import details.
 
 ## What comes next
 
-1. Run the saved example on the Snapdragon laptop and compare its exported centerlines in AutoCAD or Navisworks.
-2. Preserve branch connections and required equipment through longer routes.
-3. Include more surrounding geometry and check actual fitting shapes.
-4. Demonstrate an improvement on a reviewed real problem and explain anything that still needs a designer.
+1. Load the plugin on the event laptop and check a real drawing through AutoCAD.
+2. Confirm the result appears at the right scale and position. Try keeping a review centerline and undoing it.
+3. Preserve branch connections and required equipment through longer routes.
+4. Include more surrounding geometry and check actual fitting shapes.
+5. Demonstrate an improvement on a reviewed real problem and flag anything that still needs a designer.
 
-The algorithm currently searches possible routes. It does not train a model or learn from uploaded drawings. The Mac is our development machine. The Snapdragon laptop is the demo target. No IQ9 service or AI processor integration is included yet.
+The Mac is our development machine. The Snapdragon laptop is the AutoCAD demo target. The algorithm searches possible routes and does not learn from uploaded drawings. No IQ9 service or AI processor integration is included. IQ9 is not needed for this current workflow.
 
 ## Project notes
 
+- [AutoCAD plugin setup and commands](autocad-plugin/README.md)
 - [Team handoff and next tasks](docs/team-handoff.md)
 - [Challenge requirements and current coverage](docs/challenge-requirements.md)
 - [How the route checks work](docs/routing-prototype.md)
@@ -103,7 +115,7 @@ The algorithm currently searches possible routes. It does not train a model or l
 - [Units and rule assumptions](docs/assumptions.md)
 - [Packages and setup details](docs/dependencies.md)
 
-Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows.
+Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows. A successful test run or DLL build does not verify that the plugin loads in AutoCAD. That check must happen on the demo laptop.
 
 ## Team
 
@@ -114,6 +126,6 @@ Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -
 
 ## AI use
 
-Codex generated the initial README and `.gitignore` before challenge implementation. During the event Codex generated the initial prototype code in `pipe_router/` and `web/` along with the scripts and examples and tests. Codex also helped write this documentation. All initial code in those new prototype files was AI generated. The exact model build was not recorded.
+Codex generated the initial README and `.gitignore` before challenge implementation. During the event Codex generated the initial prototype code in `pipe_router/` and `web/` along with the scripts and examples and tests. Codex also helped extend the AutoCAD integration and write this documentation. All initial code in those new prototype files was AI generated. The exact model build was not recorded.
 
 Automated validation has run on the Mac. Human code review and final CAD comparison are still pending. Event laptop and IQ9 execution have not been verified. Keep recording AI assistance as the project grows.

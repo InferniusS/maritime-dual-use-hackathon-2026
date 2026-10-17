@@ -23,8 +23,8 @@ The Notion page text was rechecked in the browser. Its embedded PDFs reported lo
 | Use standard commercially available fittings | Manufacturer dimensions shown as a reference. Optional bend tangent length check | Select appropriate fittings and check their full physical shapes |
 | Preserve system function and correct drain pitch | Gravity checks enforce start-to-end downhill flow and a selected minimum slope | Verify real flow direction and required slope. Add other functional checks |
 | Work across piping systems | Pressure and gravity searches exercised on eight synthetic layouts | Demonstrate reviewed real inputs and additional system rules |
-| Change the CAD model or provide precise implementation information | Centerline DXF and exact coordinates. CAD candidate result JSON retains source handles and snapshot references | Verify component identity and supply complete fitting changes for CAD implementation |
-| Live run on the supplied model with results shown in AutoCAD or Navisworks | Live browser routing with a bridge from selected CAD candidates to provisional tests | Demonstrate a reviewed real run and verify results in the required CAD application |
+| Change the CAD model or provide precise implementation information | Centerline DXF and exact coordinates. The AutoCAD plugin can preview a suggestion and optionally add a separate review centerline. Source handles and drawing identity remain attached | Verify the plugin inside AutoCAD. Supply complete fitting changes and verify component identity |
+| Live run on the supplied model with results shown in AutoCAD or Navisworks | AutoCAD commands now call the existing local Python workflow. The snapshot API was tested with the cooling drawing. The browser workflow remains available | Load the DLL and demonstrate a reviewed real run in AutoCAD on the event laptop |
 | Run on the provided laptop | Mac execution tested | Verify the complete workflow on the event laptop |
 | Flag issues needing designer intervention | Reports identify unverified chains and endpoint contacts. Bounded unchanged connection stubs require an explicit local assumption. Source references remain attached | Review component identity and resolve unsupported engineering checks |
 
@@ -55,4 +55,6 @@ The current iteration has a checked three-component route from the real cooling 
 
 A clearly labeled artificial detour increases this route to 4179.25 mm. The search reduces it to 3728.30 mm. That is recovery from a generated change. It does not beat the untouched CAD baseline. The unchanged baseline remains the preferred result when tested on its own.
 
-The next milestones are to retain equipment and branch connections through longer routes and use more complete collision geometry. Then provide fitting changes that a designer can implement and verify the result in the required CAD application on the supplied laptop. The present local box and sample-based obstacle boxes do not establish full ship coverage.
+The immediate milestone is a live AutoCAD check on the event laptop. The plugin now sends a drawing snapshot to the same Python search and brings the result back as a review centerline. The source solids remain intact. The browser app is preserved as a fallback.
+
+The remaining routing milestones are to retain equipment and branch connections through longer routes and use more complete collision geometry. Then provide fitting changes that a designer can implement. The present local box and sample-based obstacle boxes do not establish full ship coverage.

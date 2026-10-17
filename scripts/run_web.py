@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import base64
 from datetime import datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import ipaddress
 import json
 import mimetypes
 from pathlib import Path
@@ -63,11 +63,23 @@ class Handler(BaseHTTPRequestHandler):
     def fail(self, status, message):
         self.send_json(status, {"error": message})
 
+    def check_host(self):
+        hosts = self.headers.get_all("Host", [])
+        if len(hosts) != 1 or not host_is_allowed(hosts[0], self.server.bind_host):
+            self.fail(403, "Use the configured local or LAN address for this workspace")
+            return False
+        return True
+
     def do_GET(self):
+        if not self.check_host():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         try:
-            if path == "/api/config":
+            if path == "/api/health":
+                from pipe_router.autocad import service_health
+                self.send_json(200, service_health())
+            elif path == "/api/config":
                 profiles = json.loads((ROOT / "examples/rule-profiles.json").read_text())
                 self.send_json(200, {
                     "scenarios": [{key: value for key, value in record.items() if key in ("id", "title", "description")} for record in self.workspace.scenarios.values()],
@@ -104,6 +116,8 @@ class Handler(BaseHTTPRequestHandler):
             self.fail(500, str(error))
 
     def do_POST(self):
+        if not self.check_host():
+            return
         # Do not accept cross-site browser requests to the local processing service.
         origin = self.headers.get("Origin")
         host = self.headers.get("Host", "")
@@ -125,6 +139,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/run":
                 self.run_layout(payload)
+            elif self.path == "/api/autocad/inspect":
+                self.inspect_autocad(payload)
             elif self.path in ("/api/cad-sample", "/api/import-cad"):
                 self.import_cad(payload)
             elif self.path == "/api/prepare-cad-layout":
@@ -173,6 +189,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def import_cad(self, payload):
         from pipe_router.cad_import import inspect_cad, lightweight_preview
+        from pipe_router.autocad import decode_dxf_upload
         source_units = payload.get("source_units", "mm")
         if source_units not in ("mm", "m", "in"):
             raise ValueError("Choose mm, m or in for source units")
@@ -184,21 +201,29 @@ class Handler(BaseHTTPRequestHandler):
             if source is None or not source.is_file():
                 raise ValueError("No local organizer drawing was configured. Choose a DXF file instead.")
         else:
-            filename = Path(payload.get("filename", "drawing.dxf")).name
-            if Path(filename).suffix.lower() != ".dxf":
-                raise ValueError("Choose a DXF file. Convert DWG to DXF with ODA File Converter first.")
-            try:
-                content = base64.b64decode(payload.get("content_base64", ""), validate=True)
-            except (ValueError, TypeError) as error:
-                raise ValueError("The uploaded file could not be read") from error
-            if not content or len(content) > 48 * 1024 * 1024:
-                raise ValueError("DXF files must be between 1 byte and 48 MB")
+            filename, content = decode_dxf_upload(payload)
             source = folder / filename
             source.write_bytes(content)
         result = inspect_cad(source, source_units=source_units)
         (folder / "cad-inspection.json").write_text(json.dumps(result, indent=2, allow_nan=False), encoding="utf-8")
         preview = lightweight_preview(result)
         self.send_json(200, {"cad": preview, "cad_id": identifier, "export": f"/downloads/{identifier}/cad-inspection.json"})
+
+    def inspect_autocad(self, payload):
+        from pipe_router.autocad import inspect_snapshot, validate_snapshot_request
+
+        request = validate_snapshot_request(payload)
+        identifier = uuid.uuid4().hex
+        folder = self.workspace.output / identifier
+        folder.mkdir()
+        source = folder / request["filename"]
+        source.write_bytes(request["content"])
+        cad, summary = inspect_snapshot(
+            source, source_units=request["source_units"],
+            selected_handles=request["selected_handles"], document=request["document"],
+        )
+        (folder / "cad-inspection.json").write_text(json.dumps(cad, indent=2, allow_nan=False), encoding="utf-8")
+        self.send_json(200, {**summary, "cad_id": identifier})
 
     def saved_cad(self, payload):
         identifier = payload.get("cad_id")
@@ -232,6 +257,8 @@ class Handler(BaseHTTPRequestHandler):
             max_stub_length=payload.get("max_stub_length", 250),
         )
         layout.setdefault("cad_context", {})["cad_id"] = identifier
+        if "autocad_context" in cad:
+            layout["cad_context"].update(cad["autocad_context"])
         self.send_json(200, {"layout": layout, "cad_id": identifier})
 
 
@@ -239,14 +266,54 @@ def re_identifier(value):
     return len(value) == 32 and all(character in "0123456789abcdef" for character in value)
 
 
+def host_is_allowed(authority, bind_host):
+    """Prevent DNS rebinding while preserving explicitly requested LAN access.
+
+    A named host is allowed only when it was supplied as --host. Wildcard binds
+    accept literal IP addresses and localhost, never arbitrary DNS names.
+    """
+    if not isinstance(authority, str) or not authority or any(ord(char) <= 32 or ord(char) == 127 for char in authority):
+        return False
+    try:
+        parsed = urlparse("//" + authority)
+        hostname = parsed.hostname
+        if (not hostname or parsed.username is not None or parsed.password is not None
+                or parsed.path or parsed.query or parsed.fragment or authority.endswith(":")):
+            return False
+        # Reading port rejects malformed or out-of-range authority values.
+        if parsed.port is not None and parsed.port == 0:
+            return False
+    except ValueError:
+        return False
+    try:
+        requested_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        requested_ip = None
+    normalized_bind = str(bind_host).lower().rstrip(".")
+    normalized_host = hostname.lower().rstrip(".")
+    try:
+        bind_ip = ipaddress.ip_address(normalized_bind)
+    except ValueError:
+        bind_ip = None
+    if normalized_bind == "localhost" or (bind_ip and bind_ip.is_loopback):
+        return normalized_host == "localhost" or bool(requested_ip and requested_ip.is_loopback)
+    if normalized_bind == "" or (bind_ip and bind_ip.is_unspecified):
+        return normalized_host == "localhost" or requested_ip is not None
+    if bind_ip:
+        return requested_ip == bind_ip
+    return normalized_host == normalized_bind
+
+
 def make_server(port=8767, output=None, cad_sample=None, host="127.0.0.1"):
     workspace = Workspace(output or ROOT / "data/generated/workspace", cad_sample)
-    return ThreadingHTTPServer((host, port), partial(Handler, workspace=workspace))
+    server = ThreadingHTTPServer((host, port), partial(Handler, workspace=workspace))
+    server.bind_host = host
+    return server
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1", help="Interface to listen on (use 0.0.0.0 for LAN access)")
+    parser.add_argument("--host", default="127.0.0.1", help="Interface to listen on. 0.0.0.0 allows LAN IP addresses. A hostname is allowed only when explicitly supplied here.")
     parser.add_argument("--port", type=int, default=8767)
     parser.add_argument("--output", type=Path, default=ROOT / "data/generated/workspace")
     parser.add_argument("--cad-sample", type=Path, action="append", help="Local DXF drawing. Repeat to add more drawings.")

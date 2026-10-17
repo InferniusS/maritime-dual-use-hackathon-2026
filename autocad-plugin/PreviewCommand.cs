@@ -11,7 +11,7 @@ using System.Text.Json;
 
 namespace Maritime.AutoCAD;
 
-public sealed class PreviewCommand
+public sealed partial class PreviewCommand
 {
     private const double BulgeTolerance = 1e-9;
 
@@ -95,7 +95,7 @@ public sealed class PreviewCommand
             editor.Regen();
             editor.WriteMessage(
                 $"\nPreviewing {previews.Count} straight segments ({routeLength:0.###} drawing units) in cyan. " +
-                "This is the selected baseline, not an optimized route; the drawing has not been changed.");
+                "This is the selected baseline. It has not been optimized. The drawing has not been changed.");
 
             if (unsupportedCurves > 0)
             {
@@ -183,8 +183,8 @@ public sealed class PreviewCommand
         try
         {
             using var transaction = document.Database.TransactionManager.StartTransaction();
-            route = ReadAndOrderRoute(routeSelection.Value, transaction);
-            obstacles = ReadObstacleExtents(obstacleSelection, transaction);
+            route = ReadAndOrderRoute(routeSelection.Value, transaction, 0.001 / scaleToMillimeters);
+            obstacles = ReadObstacleExtents(obstacleSelection, transaction, routeSelection.Value.GetObjectIds().ToHashSet());
             transaction.Commit();
         }
         catch (System.Exception exception)
@@ -237,6 +237,17 @@ public sealed class PreviewCommand
                 original_route = route.Select(ToArray)
             },
             rules = new { clearance, grid_step = gridStep, bend_penalty = 0.0 },
+            cad_context = new
+            {
+                document = new { name = System.IO.Path.GetFileName(document.Name), fingerprint = document.Database.FingerprintGuid.ToString() },
+                source_handles = routeSelection.Value.GetObjectIds().Select(id => id.Handle.ToString()).ToArray(),
+                obstacle_sources = obstacleSelection.Status == PromptStatus.OK
+                    ? obstacleSelection.Value.GetObjectIds().Select((id, index) => new { id = $"autocad-obstacle-{index + 1}", source_handle = id.Handle.ToString() }).ToArray()
+                    : [],
+                obstacle_method = "selected_entity_geometric_extents",
+                complete_ship_geometry = false,
+                connectivity_verified = false
+            },
             assumptions = new[]
             {
                 "Obstacle entities are represented by axis-aligned CAD extents selected by the user.",
@@ -247,36 +258,10 @@ public sealed class PreviewCommand
 
         try
         {
-            editor.WriteMessage("\nSending route to the local optimizer at http://127.0.0.1:8767 …");
-            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-            using var content = new StringContent(JsonSerializer.Serialize(new { layout }), System.Text.Encoding.UTF8, "application/json");
-            using var response = client.PostAsync("http://127.0.0.1:8767/api/run", content).GetAwaiter().GetResult();
-            var responseText = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            if (!response.IsSuccessStatusCode)
-            {
-                using var errorDocument = JsonDocument.Parse(responseText);
-                var message = errorDocument.RootElement.TryGetProperty("error", out var error) ? error.GetString() : response.ReasonPhrase;
-                editor.WriteMessage($"\nOptimizer returned HTTP {(int)response.StatusCode}: {message}");
-                return;
-            }
-
-            using var resultDocument = JsonDocument.Parse(responseText);
-            var result = resultDocument.RootElement.GetProperty("result");
-            var status = result.GetProperty("status").GetString();
-            if (!result.TryGetProperty("candidate", out var candidate) || candidate.ValueKind != JsonValueKind.Object ||
-                !candidate.TryGetProperty("points", out var pointsElement))
-            {
-                editor.WriteMessage($"\nNo optimized route was found. Status: {status}.");
-                return;
-            }
-
-            var optimized = pointsElement.EnumerateArray()
-                .Select(point => new Point3d(
-                    point[0].GetDouble() / scaleToMillimeters,
-                    point[1].GetDouble() / scaleToMillimeters,
-                    point[2].GetDouble() / scaleToMillimeters))
-                .ToList();
-            ShowOptimizedPreview(editor, optimized, status ?? "unknown");
+            using var client = CreateClient();
+            CheckService(client);
+            var requestLayout = JsonSerializer.SerializeToNode(layout)!.AsObject();
+            RunAndReview(document, client, requestLayout, scaleToMillimeters, document.Database.FingerprintGuid.ToString());
         }
         catch (HttpRequestException exception)
         {
@@ -307,172 +292,133 @@ public sealed class PreviewCommand
         return result.Status == PromptStatus.OK;
     }
 
-    private static List<Point3d> ReadAndOrderRoute(SelectionSet selection, Transaction transaction)
+    private static List<Point3d> ReadAndOrderRoute(SelectionSet selection, Transaction transaction, double joinTolerance)
     {
-        const double joinTolerance = 1e-6;
-        var segments = new List<List<Point3d>>();
+        var paths = new List<List<Point3d>>();
         foreach (SelectedObject? selected in selection)
         {
             if (selected?.ObjectId is not ObjectId id || id.IsNull ||
                 transaction.GetObject(id, OpenMode.ForRead) is not Entity entity)
-            {
-                continue;
-            }
-
+                throw new InvalidOperationException("A selected route object could not be read.");
             switch (entity)
             {
                 case Line line:
-                    segments.Add([line.StartPoint, line.EndPoint]);
+                    paths.Add([line.StartPoint, line.EndPoint]);
                     break;
                 case AcDbPolyline polyline:
                     if (polyline.Closed)
-                    {
-                        throw new InvalidOperationException("Closed polylines are not valid single-pipe routes for this prototype.");
-                    }
-                    for (var i = 0; i < polyline.NumberOfVertices; i++)
-                    {
-                        if (i < polyline.NumberOfVertices - 1 && Math.Abs(polyline.GetBulgeAt(i)) > BulgeTolerance)
-                        {
-                            throw new InvalidOperationException("Curved polyline segments are not supported yet.");
-                        }
-                    }
-                    segments.Add(Enumerable.Range(0, polyline.NumberOfVertices).Select(polyline.GetPoint3dAt).ToList());
+                        throw new InvalidOperationException("Closed polylines are not valid single-pipe routes.");
+                    for (var i = 0; i + 1 < polyline.NumberOfVertices; i++)
+                        if (Math.Abs(polyline.GetBulgeAt(i)) > BulgeTolerance)
+                            throw new InvalidOperationException("Curved polyline segments are not supported by MARITIMEOPTIMIZE. Use MARITIMECAD for supported solid pipe geometry.");
+                    paths.Add(Enumerable.Range(0, polyline.NumberOfVertices).Select(polyline.GetPoint3dAt).ToList());
                     break;
                 case Polyline3d polyline3d:
-                    if (polyline3d.Closed)
-                    {
-                        throw new InvalidOperationException("Closed polylines are not valid single-pipe routes for this prototype.");
-                    }
+                    if (polyline3d.Closed || polyline3d.PolyType != Poly3dType.SimplePoly)
+                        throw new InvalidOperationException("Select an open simple 3D polyline. Fitted or closed polylines are unsupported.");
                     var vertices = new List<Point3d>();
                     foreach (ObjectId vertexId in polyline3d)
-                    {
                         if (transaction.GetObject(vertexId, OpenMode.ForRead) is PolylineVertex3d vertex)
-                        {
                             vertices.Add(vertex.Position);
-                        }
-                    }
-                    segments.Add(vertices);
+                    paths.Add(vertices);
                     break;
+                default:
+                    throw new InvalidOperationException($"Route object {entity.Handle} ({entity.GetType().Name}) is unsupported. No selected objects have been skipped.");
             }
         }
+        if (paths.Count == 0 || paths.Any(path => path.Count < 2))
+            throw new InvalidOperationException("Each route entity must contain at least two vertices.");
+        if (paths.Sum(path => path.Count) > 2000)
+            throw new InvalidOperationException("Select a smaller route with at most 2000 centerline vertices.");
 
-        if (segments.Count == 0)
+        // Every vertex participates in the graph, including vertices inside a polyline.
+        var nodes = new List<Point3d>();
+        var edges = new HashSet<(int, int)>();
+        var neighbors = new Dictionary<int, List<int>>();
+        int Node(Point3d point)
         {
-            throw new InvalidOperationException("Select at least one LINE or polyline.");
+            if (!double.IsFinite(point.X) || !double.IsFinite(point.Y) || !double.IsFinite(point.Z))
+                throw new InvalidOperationException("Route contains a non-finite coordinate.");
+            var matches = Enumerable.Range(0, nodes.Count).Where(i => nodes[i].DistanceTo(point) <= joinTolerance).ToList();
+            if (matches.Count > 1) throw new InvalidOperationException("Route vertices are ambiguous within the connection tolerance.");
+            if (matches.Count == 1) return matches[0];
+            nodes.Add(point);
+            neighbors[nodes.Count - 1] = [];
+            return nodes.Count - 1;
         }
-        if (segments.Any(path => path.Count < 2))
+        foreach (var path in paths)
         {
-            throw new InvalidOperationException("Each selected route entity must contain at least two vertices.");
-        }
-
-        // Start at a free endpoint so selection order does not have to match route order.
-        var startSegmentIndex = -1;
-        var startAtBeginning = true;
-        for (var segmentIndex = 0; segmentIndex < segments.Count && startSegmentIndex < 0; segmentIndex++)
-        {
-            for (var endpointIndex = 0; endpointIndex < 2; endpointIndex++)
+            for (var index = 0; index + 1 < path.Count; index++)
             {
-                var endpoint = endpointIndex == 0 ? segments[segmentIndex][0] : segments[segmentIndex][^1];
-                var connectedElsewhere = segments.Where((_, otherIndex) => otherIndex != segmentIndex)
-                    .Any(path => path[0].DistanceTo(endpoint) <= joinTolerance || path[^1].DistanceTo(endpoint) <= joinTolerance);
-                if (!connectedElsewhere)
-                {
-                    startSegmentIndex = segmentIndex;
-                    startAtBeginning = endpointIndex == 0;
-                    break;
-                }
+                var first = Node(path[index]);
+                var second = Node(path[index + 1]);
+                if (first == second) throw new InvalidOperationException("Route contains a zero-length or duplicate segment.");
+                var key = first < second ? (first, second) : (second, first);
+                if (!edges.Add(key)) throw new InvalidOperationException("Route contains overlapping duplicate segments.");
+                neighbors[first].Add(second);
+                neighbors[second].Add(first);
             }
         }
-        if (startSegmentIndex < 0)
+        if (neighbors.Values.Any(links => links.Count > 2))
+            throw new InvalidOperationException("The selected centerline branches or revisits a connection. Select one non-branching path.");
+        var ends = neighbors.Where(item => item.Value.Count == 1).Select(item => item.Key).ToList();
+        if (ends.Count != 2) throw new InvalidOperationException("Select one open path with exactly two free ends.");
+        foreach (var (first, second) in edges)
         {
-            throw new InvalidOperationException("Selected route pieces must form one open, non-branching path.");
-        }
-
-        var ordered = segments[startSegmentIndex];
-        if (!startAtBeginning)
-        {
-            ordered.Reverse();
-        }
-        segments.RemoveAt(startSegmentIndex);
-        while (segments.Count > 0)
-        {
-            var last = ordered[^1];
-            var matches = segments.Select((path, index) => new { path, index })
-                .Where(item => item.path[0].DistanceTo(last) <= joinTolerance || item.path[^1].DistanceTo(last) <= joinTolerance)
-                .ToList();
-            if (matches.Count != 1)
+            var direction = nodes[second] - nodes[first];
+            var length = direction.Length;
+            for (var index = 0; index < nodes.Count; index++)
             {
-                throw new InvalidOperationException("Selected route pieces must form one connected, non-branching path.");
+                if (index == first || index == second) continue;
+                var fraction = (nodes[index] - nodes[first]).DotProduct(direction) / (length * length);
+                if (fraction <= joinTolerance / length || fraction >= 1 - joinTolerance / length) continue;
+                var closest = nodes[first] + direction * fraction;
+                if (closest.DistanceTo(nodes[index]) <= joinTolerance)
+                    throw new InvalidOperationException("A selected vertex touches the middle of another segment. Resolve this branch or overlap before routing.");
             }
-            var match = matches[0];
-            var next = match.path;
-            segments.RemoveAt(match.index);
-            if (next[^1].DistanceTo(last) <= joinTolerance)
-            {
-                next.Reverse();
-            }
-            ordered.AddRange(next.Skip(1));
         }
+        var ordered = new List<Point3d>();
+        var visited = new HashSet<int>();
+        var current = ends[0];
+        var previous = -1;
+        while (true)
+        {
+            if (!visited.Add(current)) throw new InvalidOperationException("Selected route contains a loop.");
+            ordered.Add(nodes[current]);
+            var next = neighbors[current].Where(id => id != previous).ToList();
+            if (next.Count == 0) break;
+            previous = current;
+            current = next[0];
+        }
+        if (visited.Count != nodes.Count) throw new InvalidOperationException("Selected route pieces are disconnected.");
         return ordered;
     }
 
-    private static List<Extents3d> ReadObstacleExtents(PromptSelectionResult selection, Transaction transaction)
+    private static List<Extents3d> ReadObstacleExtents(PromptSelectionResult selection, Transaction transaction, HashSet<ObjectId> routeIds)
     {
         var extents = new List<Extents3d>();
-        if (selection.Status != PromptStatus.OK)
-        {
-            return extents;
-        }
+        if (selection.Status != PromptStatus.OK) return extents;
         foreach (SelectedObject? selected in selection.Value)
         {
-            if (selected?.ObjectId is ObjectId id && !id.IsNull &&
-                transaction.GetObject(id, OpenMode.ForRead) is Entity entity)
+            if (selected?.ObjectId is not ObjectId id || id.IsNull ||
+                transaction.GetObject(id, OpenMode.ForRead) is not Entity entity)
+                throw new InvalidOperationException("A selected obstacle could not be read. No obstacle has been silently skipped.");
+            if (routeIds.Contains(id))
+                throw new InvalidOperationException($"Route object {entity.Handle} was also selected as an obstacle. Select the surrounding objects only.");
+            Extents3d box;
+            try { box = entity.GeometricExtents; }
+            catch (System.Exception)
             {
-                extents.Add(entity.GeometricExtents);
+                throw new InvalidOperationException($"Obstacle {entity.Handle} ({entity.GetType().Name}) has no readable 3D bounds.");
             }
+            if (box.MinPoint.X >= box.MaxPoint.X || box.MinPoint.Y >= box.MaxPoint.Y || box.MinPoint.Z >= box.MaxPoint.Z)
+                throw new InvalidOperationException($"Obstacle {entity.Handle} has zero thickness on an axis. Use a solid with actual thickness for this obstacle.");
+            extents.Add(box);
         }
         return extents;
     }
 
     private static double[] ToArray(Point3d point) => [point.X, point.Y, point.Z];
-
-    private static void ShowOptimizedPreview(Editor editor, IReadOnlyList<Point3d> points, string status)
-    {
-        if (points.Count < 2)
-        {
-            editor.WriteMessage("\nOptimizer returned fewer than two route points.");
-            return;
-        }
-        var manager = TransientManager.CurrentTransientManager;
-        var viewports = new IntegerCollection();
-        var previews = new List<Line>();
-        try
-        {
-            for (var index = 0; index + 1 < points.Count; index++)
-            {
-                var line = new Line(points[index], points[index + 1]);
-                line.Color = Color.FromColorIndex(ColorMethod.ByAci, 3);
-                if (!manager.AddTransient(line, TransientDrawingMode.Main, 128, viewports))
-                {
-                    line.Dispose();
-                    throw new InvalidOperationException("AutoCAD could not display the optimized route preview.");
-                }
-                previews.Add(line);
-            }
-            editor.Regen();
-            editor.WriteMessage($"\nOptimizer status: {status}. Green is the suggested centerline; the DWG has not been changed.");
-            editor.GetString(new PromptStringOptions("\nPress Enter to clear the optimization preview: "));
-        }
-        finally
-        {
-            foreach (var line in previews)
-            {
-                manager.EraseTransient(line, viewports);
-                line.Dispose();
-            }
-            editor.Regen();
-        }
-    }
 
     private static void ReadPolyline(
         AcDbPolyline polyline,
