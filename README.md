@@ -6,8 +6,8 @@ Our team's repo for the Maritime Dual Use Hackathon on October 16-18 2026.
 
 - Efe ([@InferniusS](https://github.com/InferniusS))
 - Hasan Onallah ([@HasanOnallah1](https://github.com/HasanOnallah1))
-- Murad ([@EJICKmini](https://github.com/EJICKmini))
-- Teammate 4: TBD
+- Murad Gasimov ([@EJICKmini](https://github.com/EJICKmini))
+- Krishna Challapalli 
 
 ## Project
 
