@@ -3,6 +3,7 @@ using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.GraphicsInterface;
 using Autodesk.AutoCAD.Runtime;
+using AcDbPolyline = Autodesk.AutoCAD.DatabaseServices.Polyline;
 
 namespace Maritime.AutoCAD;
 
@@ -64,7 +65,7 @@ public sealed class PreviewCommand
                         case Line line:
                             AddSegment(line.StartPoint, line.EndPoint, previews, ref routeLength);
                             break;
-                        case Polyline polyline:
+                        case AcDbPolyline polyline:
                             ReadPolyline(polyline, previews, ref routeLength, ref unsupportedCurves);
                             break;
                         case Polyline3d polyline3d:
@@ -120,7 +121,7 @@ public sealed class PreviewCommand
     }
 
     private static void ReadPolyline(
-        Polyline polyline,
+        AcDbPolyline polyline,
         ICollection<Line> previews,
         ref double routeLength,
         ref int unsupportedCurves)
