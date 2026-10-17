@@ -4,7 +4,9 @@ Updated October 17 2026. We are now making AutoCAD the main way to use the proje
 
 ## Start here at the venue
 
-Follow the [AutoCAD setup guide](../autocad-plugin/README.md). Start the Python service on the same laptop as AutoCAD. Load the included `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` with `NETLOAD` and run `MARITIMECAD` on a pipe solid or block. The included DLL lets you try it without installing a build SDK.
+AutoCAD 2027 is already installed on the Snapdragon laptop. Follow the [step-by-step Snapdragon guide](snapdragon-guide.md). It includes each Python command in its own copyable block and the fix for the unsigned setup script message.
+
+Start the Python service on the same laptop as AutoCAD. Load the included `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` with `NETLOAD`. Try the small test drawing before using `MARITIMECAD` on a real pipe solid or block. The included DLL lets you try it without installing a build SDK. The [plugin reference](../autocad-plugin/README.md) also covers rebuilding and command details.
 
 The first venue milestone is a successful run inside AutoCAD. The code and service can be built and tested on the Mac. That does not prove the DLL loads on the Snapdragon laptop or that AutoCAD exports every needed object correctly.
 

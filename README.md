@@ -6,7 +6,9 @@ We picked Track 2. We are building a tool that checks existing ship piping and s
 
 ## Start with AutoCAD
 
-The [AutoCAD setup guide](autocad-plugin/README.md) has the full steps. The short version is:
+**At the venue start with the [Snapdragon guide](docs/snapdragon-guide.md).** It gives each command separately and walks through the AutoCAD test. AutoCAD 2027 is already installed on the team laptop. The plugin still needs its first live test there.
+
+The [plugin guide](autocad-plugin/README.md) explains the commands and optional source build. The short version is:
 
 1. Download or clone this repo on the AutoCAD laptop.
 2. Install the Python environment and start the local service.
@@ -52,28 +54,53 @@ The Python code passed 373 automated tests on the Mac. The new snapshot path als
 
 ## Start the Python service
 
-Use standard CPython 3.14.x. On a Snapdragon Windows laptop use the ARM64 build for the Python service. The setup scripts create a separate environment for this project. Run these commands from the extracted repo folder.
+Use standard CPython 3.14.x. Create a separate environment for this project on each computer. Run these commands from the extracted repo folder that contains `requirements-lock.txt` and `scripts`.
 
 ### Windows
 
+The team laptop already reports Python 3.14.8 through the `python` command. Use the commands below in PowerShell. Run **one block at a time** and wait for it to finish. If any step reports an error stop there and use the [Snapdragon guide](docs/snapdragon-guide.md) before continuing.
+
+First create the project environment:
+
 ```powershell
-.\scripts\setup_windows.ps1
-.\.venv\Scripts\python.exe scripts\run_web.py
+python -m venv .venv
 ```
 
-If PowerShell blocks the setup script use these commands instead:
+Install the required packages:
 
 ```powershell
-py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements-lock.txt
+```
+
+Check that the packages agree with each other:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+```
+
+This should say `No broken requirements found.` Then run the project check:
+
+```powershell
 .\.venv\Scripts\python.exe scripts\check_setup.py
+```
+
+Continue only when it prints `PASS`. Start the local service:
+
+```powershell
 .\.venv\Scripts\python.exe scripts\run_web.py
 ```
+
+These commands call the environment's Python directly. You do not need to run `Activate.ps1` or change PowerShell's execution policy. The blocked setup script is not needed for these steps.
 
 ### Mac
 
 ```sh
 bash scripts/setup_mac.sh
+```
+
+After setup finishes start the service:
+
+```sh
 .venv/bin/python scripts/run_web.py
 ```
 
@@ -107,6 +134,7 @@ The Mac is our development machine. The Snapdragon laptop is the AutoCAD demo ta
 
 ## Project notes
 
+- [Snapdragon setup one step at a time](docs/snapdragon-guide.md)
 - [AutoCAD plugin setup and commands](autocad-plugin/README.md)
 - [Team handoff and next tasks](docs/team-handoff.md)
 - [Challenge requirements and current coverage](docs/challenge-requirements.md)

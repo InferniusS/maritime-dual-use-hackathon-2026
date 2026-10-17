@@ -4,6 +4,8 @@ This plugin brings the existing Python pipe router into AutoCAD. AutoCAD handles
 
 The website does not need to be open. Both the plugin and browser app use the same calculation code.
 
+**For the event laptop follow the [Snapdragon guide](../docs/snapdragon-guide.md).** It covers the full setup and test one command at a time. AutoCAD 2027 is already installed there. The plugin still needs its first live test.
+
 ## Requirements
 
 - AutoCAD 2027 for Windows with managed .NET plugin support
@@ -16,16 +18,45 @@ AutoCAD for Mac cannot load this managed .NET plugin. The Mac can run the Python
 
 ## Start the local service
 
-From a PowerShell window in the repo folder:
+Open PowerShell in the extracted repo folder. You should see `requirements-lock.txt` and the `scripts` folder there. The team laptop already has a working `python` command for Python 3.14.8.
+
+Run each block separately. Wait for it to finish before continuing. **Stop at the first error.** The [Snapdragon guide](../docs/snapdragon-guide.md) explains what each result should look like.
+
+Create the project environment:
 
 ```powershell
-.\scripts\setup_windows.ps1
+python -m venv .venv
+```
+
+Install the packages:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements-lock.txt
+```
+
+Check their dependencies:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip check
+```
+
+This should print `No broken requirements found.` Then check the project:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_setup.py
+```
+
+Start the service only after the check prints `PASS`:
+
+```powershell
 .\.venv\Scripts\python.exe scripts\run_web.py
 ```
 
 Keep this window running. The plugin connects to `http://127.0.0.1:8767` on the same computer. It does not connect to Efe's Mac or a hosted website.
 
-You can check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. The [main setup guide](../README.md#start-the-python-service) has alternatives if the PowerShell setup script is blocked.
+These commands do not require `Activate.ps1` or a PowerShell execution policy change. You can leave the blocked setup script alone.
+
+Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Then load the plugin below.
 
 ## Use the included DLL
 
