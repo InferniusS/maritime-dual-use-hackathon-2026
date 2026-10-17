@@ -6,15 +6,15 @@
   "sdk_version": "10.0.402",
   "autodesk_reference_package": "AutoCAD.NET 26.0.0",
   "command": "dotnet build autocad-plugin/Maritime.AutoCAD.csproj -c Release -p:DebugType=None",
-  "dll_sha256": "db478f4ba6e9922aea56eeed60f7ab60adb417e02e0d9dcd248e11f665027306",
+  "dll_sha256": "fbea0b4175d2a646e9e66e6a09a4bd2896a5e2382fe1ca7bdc363ab1e61b5e20",
   "source_sha256": {
     "autocad-plugin/Maritime.AutoCAD.csproj": "25934cc9a6fa53a3decbd00759bccd3ececf07e99a18123fb8c336c2351ed6b1",
-    "autocad-plugin/CadCommand.cs": "5668ba20d5279818907195d4bc2dcbc5d3ce2d9d810f97bea02b069534aa4e77",
+    "autocad-plugin/CadCommand.cs": "8d5a6f5c4b6b32cae031cd6b09e16abdac65d9c288f1f7d61ac663e406f429f5",
     "autocad-plugin/PreviewCommand.cs": "a10f65cf9d5aab99961d20cfc65e4435bd3fe8538a6ad9dc6d7b990d12e8dded"
   },
   "build_warnings": 0,
   "build_errors": 0,
   "autocad_runtime_verified": false,
-  "runtime_check_needed": "Load with NETLOAD on the venue laptop. Check selection, snapshot export, preview, Save and Undo.",
+  "runtime_check_needed": "This diagnostic build needs a venue retry. The previous build passed the simple line workflow and Save. Capture request error details and Python request logs for the real drawing.",
   "bundled_autodesk_runtime_assemblies": false
 }

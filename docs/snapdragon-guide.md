@@ -223,6 +223,29 @@ If you downloaded a ZIP use a fresh extracted folder for the update and repeat t
 
 ## 8. If a step fails
 
+### A connection error while the health page still works
+
+The venue run reached the real pipe calculation but reported a generic request error. The health page still responded. This does not establish why the calculation request failed.
+
+The latest diagnostic build names the failed request and shows its underlying error. Python now prints when each POST request starts and finishes. Routing rules are unchanged.
+
+To update an existing working setup:
+
+1. Save any drawing work you need and close AutoCAD completely.
+2. Press Ctrl+C in the Python PowerShell window to stop that service.
+3. Download a fresh repo ZIP from GitHub using Code then Download ZIP. Extract it to a temporary folder.
+4. Copy `scripts/run_web.py` from that download over the same file in your existing project folder.
+5. Copy `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` and `autocad-plugin/prebuilt/build-info.json` over those files in your existing project folder.
+6. Keep the existing `.venv` and drawings. Start the service again with the command below from the existing project folder.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_web.py
+```
+
+Reopen AutoCAD and use `NETLOAD` to load the updated DLL. Retry `MARITIMECAD` with the same selection and settings. Keep the full AutoCAD message and the latest Python request log together if it fails. Do not start a second service while a calculation is still running.
+
+The Mac replay of source `DB1` with 50 mm clearance and 250 mm fixed ends returned `no_route` normally. A nearby obstacle box blocks the checked route. This is a separate result from the connection failure. The imported geometry and accepted end contacts still need review before interpreting it as a real physical collision.
+
 | What you see | What to do next |
 | --- | --- |
 | `setup_windows.ps1` is not digitally signed | Use the separate Python commands in section 2. Do not rerun the blocked script |

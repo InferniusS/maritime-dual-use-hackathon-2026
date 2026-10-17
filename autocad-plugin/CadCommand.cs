@@ -153,14 +153,6 @@ public sealed partial class PreviewCommand
             if (system == "Gravity") rules["min_slope"] = slope;
             RunAndReview(document, client, layout, scale, metadata.fingerprint, snapshotHash);
         }
-        catch (HttpRequestException exception)
-        {
-            editor.WriteMessage($"\nCannot reach the local optimizer. Run scripts/run_web.py on this laptop. {exception.Message}");
-        }
-        catch (TaskCanceledException)
-        {
-            editor.WriteMessage("\nThe local request timed out. No suggestion was saved. The service may still be finishing the calculation.");
-        }
         catch (System.Exception exception)
         {
             editor.WriteMessage($"\nMaritime CAD check stopped: {exception.Message}");
@@ -180,17 +172,46 @@ public sealed partial class PreviewCommand
 
     private static void CheckService(HttpClient client)
     {
-        using var response = client.GetAsync("/api/health").GetAwaiter().GetResult();
-        var json = ReadResponse(response);
+        var json = SendServiceJson(client, HttpMethod.Get, "/api/health");
         if (Text(json, "service") != "maritime-pipe-router" || Number(json, "api_version") != 1 || Text(json, "units") != "mm")
             throw new InvalidOperationException("The local service is not a compatible Maritime optimizer. Update and restart the Python service.");
     }
 
-    private static JsonObject PostJson(HttpClient client, string path, object payload)
+    private static JsonObject PostJson(HttpClient client, string path, object payload) =>
+        SendServiceJson(client, HttpMethod.Post, path, payload);
+
+    private static JsonObject SendServiceJson(HttpClient client, HttpMethod method, string path, object? payload = null)
     {
-        using var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-        using var response = client.PostAsync(path, content).GetAwaiter().GetResult();
-        return ReadResponse(response);
+        using var request = new HttpRequestMessage(method, path);
+        if (payload is not null)
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        try
+        {
+            using var response = client.SendAsync(request).GetAwaiter().GetResult();
+            return ReadResponse(response);
+        }
+        catch (HttpRequestException exception)
+        {
+            throw new InvalidOperationException(
+                $"Local request {method} {path} did not complete. No suggestion was saved. " +
+                "Check the Python window for details. The service may still be running.\n" +
+                $"HTTP error category: {exception.HttpRequestError}\n{DescribeRequestFailure(exception)}", exception);
+        }
+        catch (TaskCanceledException exception)
+        {
+            throw new InvalidOperationException(
+                $"Local request {method} {path} timed out or was canceled. No suggestion was saved. " +
+                "The service may still be finishing the calculation. Check the Python window before trying again.\n" +
+                DescribeRequestFailure(exception), exception);
+        }
+    }
+
+    private static string DescribeRequestFailure(System.Exception exception)
+    {
+        var details = new List<string>();
+        for (System.Exception? current = exception; current is not null; current = current.InnerException)
+            details.Add($"{current.GetType().Name}: {current.Message}");
+        return string.Join("\nCaused by: ", details);
     }
 
     private static JsonObject ReadResponse(HttpResponseMessage response)

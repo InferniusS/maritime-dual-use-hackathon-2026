@@ -12,6 +12,7 @@ import mimetypes
 from pathlib import Path
 import time
 import threading
+import traceback
 from urllib.parse import parse_qs, urlparse
 import uuid
 
@@ -43,12 +44,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def __init__(self, *args, workspace, **kwargs):
         self.workspace = workspace
+        self._response_started = False
+        self._response_complete = False
+        self._response_status = None
         super().__init__(*args, **kwargs)
 
     def log_message(self, format, *args):
         pass
 
     def send_bytes(self, status, body, content_type):
+        # Once a response is attempted, a broken connection must not trigger a
+        # second JSON response on the same socket.
+        self._response_started = True
+        self._response_status = status
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -56,6 +64,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
+        self._response_complete = True
 
     def send_json(self, status, record):
         self.send_bytes(status, json.dumps(record, allow_nan=False).encode("utf-8"), "application/json; charset=utf-8")
@@ -113,9 +122,51 @@ class Handler(BaseHTTPRequestHandler):
                 mime = mimetypes.guess_type(target.name)[0] or "text/plain"
                 self.send_bytes(200, target.read_bytes(), mime + "; charset=utf-8")
         except (OSError, ValueError, KeyError) as error:
-            self.fail(500, str(error))
+            if self._response_started:
+                self.close_connection = True
+            else:
+                self.fail(500, str(error))
 
     def do_POST(self):
+        started = time.perf_counter()
+        request_id = uuid.uuid4().hex[:8]
+        path = urlparse(self.path).path
+        path = "".join(character if 32 <= ord(character) < 127 else "?" for character in path)[:160]
+        self._response_started = self._response_complete = False
+        self._response_status = None
+        failed = False
+
+        def log(event, detail=""):
+            status = self._response_status if self._response_status is not None else "pending"
+            print(f"[{request_id}] POST {path} {event} status={status} elapsed={time.perf_counter() - started:.2f}s{detail}", flush=True)
+
+        def log_error(error):
+            # Exception messages can contain uploaded values. Keep useful error
+            # types, OS codes and stack locations without logging CAD content.
+            codes = "".join(f" {key}={getattr(error, key)}" for key in ("errno", "winerror") if getattr(error, key, None) is not None)
+            frames = " > ".join(f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}"
+                                for frame in traceback.extract_tb(error.__traceback__))
+            log("error", f" type={type(error).__name__}{codes} at={frames}")
+
+        log("received")
+        try:
+            self.handle_post()
+        except Exception as error:
+            failed = True
+            log_error(error)
+            self.close_connection = True
+            if not self._response_started and not isinstance(error, ConnectionError):
+                status = 400 if isinstance(error, (ValueError, KeyError, TypeError, OSError, RuntimeError)) else 500
+                message = str(error) if status == 400 else f"The operation could not finish: {type(error).__name__}: {error}"
+                try:
+                    self.fail(status, message)
+                except Exception as send_error:
+                    log_error(send_error)
+        finally:
+            event = "finished" if self._response_complete and not failed and self._response_status < 400 else "failed"
+            log(event)
+
+    def handle_post(self):
         if not self.check_host():
             return
         # Do not accept cross-site browser requests to the local processing service.
@@ -157,10 +208,6 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(200, {"layout": make_detour_case(layout, offset_mm=payload.get("offset_mm"))})
             else:
                 self.fail(404, "Unknown action")
-        except (ValueError, KeyError, TypeError, OSError, RuntimeError) as error:
-            self.fail(400, str(error))
-        except Exception as error:
-            self.fail(500, f"The operation could not finish: {type(error).__name__}: {error}")
         finally:
             RUN_LOCK.release()
 
