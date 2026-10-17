@@ -1,0 +1,56 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e7edf5; background: #0a1320; font-size: 14px; line-height: 1.5 }
+* { box-sizing: border-box }
+body { margin: 0 }
+[hidden] { display: none !important }
+header { display: flex; align-items: center; justify-content: space-between; padding: 25px 32px 18px; gap: 16px }
+h1 { margin: 5px 0 0; font-size: 28px; letter-spacing: -.035em; font-weight: 650 }
+h2 { margin: 3px 0 12px; font-size: 19px; letter-spacing: -.02em }
+p { margin: 8px 0 14px }
+.eyebrow { font-size: 10px; letter-spacing: .13em; color: #7fa7c6; font-weight: 700 }
+.local { border: 1px solid #254a45; border-radius: 30px; padding: 7px 13px; font-size: 12px; color: #85dac3; white-space: nowrap }
+nav { padding: 0 32px; border-bottom: 1px solid #263447; display: flex; gap: 24px }
+.tab { background: none; border: 0; color: #8da0b8; padding: 12px 0; border-bottom: 2px solid transparent; border-radius: 0 }
+.tab.active { color: #6cdec7; border-bottom-color: #6cdec7 }
+.notice { margin: 18px 32px 0; color: #d7bc87; background: #28251e; border: 1px solid #514432; border-radius: 8px; padding: 10px 14px; font-size: 12px }
+.workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 20px; padding: 20px 32px }
+.panel { border: 1px solid #25364d; border-radius: 11px; padding: 20px; background: #101e30 }
+.controls { align-self: start; position: sticky; top: 16px }
+.results { min-width: 0; display: grid; gap: 16px; align-content: start }
+.muted, .hint { color: #96a8be }
+.hint { font-size: 12px; margin: 8px 0 12px }
+label { display: block; font-size: 12px; font-weight: 600; color: #c3cfdd; margin: 15px 0 6px }
+select, input, textarea { display: block; width: 100%; border: 1px solid #3b5069; border-radius: 7px; background: #182a40; padding: 9px 10px; font: inherit; color: #f0f5fa }
+select:focus, input:focus, textarea:focus { outline: 2px solid #43cbb3; outline-offset: 1px }
+button { cursor: pointer; font: inherit; font-weight: 600; border-radius: 7px; padding: 10px 14px }
+button:disabled { opacity: .5; cursor: wait }
+.primary { display: block; width: 100%; margin: 18px 0 8px; background: #66d7bd; border: 1px solid #8ee9d3; color: #08251e }
+.primary:hover { background: #8ce6d1 }
+.secondary { background: #1b2e46; color: #c8d8e9; border: 1px solid #3b526d; margin-top: 10px }
+.controls .secondary { width: 100% }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px }
+.input-unit { color: #96a8be; font-weight: 400 }
+details { margin-top: 14px }
+summary { cursor: pointer; font-weight: 600; color: #c4d2e0 }
+.stats { display: grid; grid-template-columns: 1fr 1fr 1.1fr; gap: 12px; margin-top: 18px }
+.stats>div { background: #182a40; border-radius: 8px; padding: 12px }
+.stats span { display: block; color: #95aac1; font-size: 11px; margin-bottom: 5px }
+.stats strong { font-size: 16px; font-weight: 600 }
+.plot-panel { padding: 12px 16px }
+.plot-panel>div { height: 490px }
+.links { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 16px; align-items: center }
+a { color: #74dfc8; text-underline-offset: 3px }
+li { margin: 8px 0; color: #c3cfdd }
+ul { padding-left: 20px }
+.check-pass { color: #80d9ba }
+.check-fail { color: #ffc093 }
+.issue { padding: 11px 13px; background: #1a2b41; border-left: 3px solid #7b9ab8; margin: 8px 0; border-radius: 4px }
+textarea { min-height: 300px; margin-top: 12px; resize: vertical; font-family: ui-monospace, monospace; font-size: 12px }
+#error { margin: 16px 32px 0; padding: 12px 16px; border: 1px solid #bb7365; background: #472d2c; color: #ffded6; border-radius: 8px }
+footer { padding: 12px 32px 30px; color: #7d91a9; font-size: 12px }
+.fitting { border-bottom: 1px solid #31445a; padding: 10px 0; font-size: 12px }
+.view-controls { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; padding-bottom: 8px; border-bottom: 1px solid #25364d }
+.check-label { display: flex; align-items: center; gap: 9px; margin: 12px 0; font-weight: 400 }
+.check-label input { width: 16px; height: 16px; margin: 0; padding: 0; accent-color: #66d7bd }
+#cad-test-controls { border-top: 1px solid #33475c; margin-top: 20px; padding-top: 16px }
+input:disabled, select:disabled { opacity: .7 }
+@media(max-width: 850px) { header { align-items: start } .workspace { grid-template-columns: 1fr; padding: 16px } .controls { position: static } .stats { grid-template-columns: 1fr } header, nav { padding-left: 16px; padding-right: 16px } .notice, #error { margin-left: 16px; margin-right: 16px } .local { display: none } }

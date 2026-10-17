@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pipe routing workspace</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/assets/plotly.min.js"></script>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">MARITIME HACKATHON / TRACK 2</span><h1>Pipe routing workspace</h1></div>
+    <span class="local">Running on this computer</span>
+  </header>
+  <nav aria-label="Workspace views">
+    <button class="tab active" id="routing-tab" type="button">Check a route</button>
+    <button class="tab" id="cad-tab" type="button">Explore real CAD</button>
+  </nav>
+  <div class="notice">Prototype rules are assumed. A passing check applies only to the checks implemented here. Official design compliance is not verified.</div>
+  <div id="error" role="alert" hidden></div>
+
+  <main id="routing-view" class="workspace">
+    <aside class="panel controls">
+      <h2>Layout and rules</h2>
+      <label for="scenario">Start with a layout</label><select id="scenario"></select>
+      <button class="secondary" id="import-layout" type="button">Open a layout file</button><input id="layout-file" type="file" accept=".json" hidden>
+      <button class="secondary" id="test-cad" type="button">Test a CAD drawing</button>
+      <p id="cad-linked-note" class="hint" hidden></p>
+      <label for="profile">Rule profile</label><select id="profile"></select>
+      <label for="input-units">Interpret input coordinates as</label>
+      <select id="input-units"><option value="mm">Millimetres</option><option value="m">Metres</option><option value="in">Inches</option></select>
+      <p class="hint">Changing this assumption rescales the complete input. Results are shown in millimetres.</p>
+      <div class="fields">
+        <div><label for="diameter">Outer diameter <span class="input-unit">mm</span></label><input id="diameter" type="number" min="0.001" step="any"></div>
+        <div><label for="clearance">Clearance <span class="input-unit">mm</span></label><input id="clearance" type="number" min="0" step="any"></div>
+      </div>
+      <div id="slope-field" hidden><label for="slope">Minimum downhill slope %</label><input id="slope" type="number" min="0" step="0.1" value="1"><p class="hint">Flow runs from Start to End.</p></div>
+      <details><summary>Search settings</summary>
+        <label for="grid-step">Search spacing <span class="input-unit">mm</span></label><input id="grid-step" type="number" min="0.001" step="any">
+        <label for="bend-penalty">Preference against turns <span class="input-unit">mm</span></label><input id="bend-penalty" type="number" min="0" step="any">
+        <label for="bend-radius">Assumed bend radius <span class="input-unit">mm</span></label><input id="bend-radius" type="number" min="0" step="any" placeholder="Not set">
+        <p class="hint">A radius checks whether adjacent legs have enough length. It does not establish that a particular fitting is approved.</p>
+      </details>
+      <button class="primary" id="run" type="button">Check and improve route</button>
+      <div id="run-status" class="hint" aria-live="polite">Choose a layout then run the checks.</div>
+      <section id="connection-controls" hidden>
+        <h2>Keep connection ends fixed</h2>
+        <p class="hint" id="connection-summary"></p>
+        <details><summary>Objects touching the ends</summary><div id="connection-list" class="hint"></div></details>
+        <label class="check-label"><input type="checkbox" id="assume-connections">Treat listed endpoint contacts as fixed connections</label>
+        <label for="max-stub">Maximum fixed end length mm</label><input id="max-stub" type="number" min="1" max="1000" value="250" step="any">
+        <p class="hint">This is a local test assumption. It keeps the original ends in place. The middle still checks every obstacle. It does not verify that these objects are actual fittings.</p>
+        <button class="secondary" id="apply-connections" type="button">Apply connection assumptions</button>
+        <p id="connection-status" class="hint" aria-live="polite"></p>
+      </section>
+      <section id="benchmark-controls" hidden>
+        <h2>Try a controlled change</h2>
+        <p class="hint">Add an artificial extra detour to a route that passes the current checks. Then see whether the search can remove it. The original CAD file stays unchanged.</p>
+        <label for="detour-offset">Extra detour offset mm</label><input id="detour-offset" type="number" min="1" max="1000" value="250" step="any">
+        <button class="secondary" id="make-detour" type="button">Create a detour test</button>
+        <button class="secondary" id="restore-baseline" type="button" hidden>Restore the baseline route</button>
+        <p id="benchmark-status" class="hint" aria-live="polite"></p>
+      </section>
+      <details><summary>Available elbow examples</summary><div id="fittings"></div></details>
+    </aside>
+
+    <section class="results">
+      <div class="panel summary"><span class="eyebrow" id="provenance">SYNTHETIC LAYOUT</span><h2 id="layout-name">Loading layouts</h2><p id="layout-note" class="muted"></p>
+        <div class="stats"><div><span>Original</span><strong id="original-metric">Not checked</strong></div><div><span>Suggested</span><strong id="candidate-metric">Not calculated</strong></div><div><span>Result</span><strong id="outcome">Ready</strong></div></div>
+        <p id="benchmark-note" class="hint" hidden></p>
+      </div>
+      <div class="panel plot-panel">
+        <section id="cad-view-controls" class="view-controls" hidden>
+          <label class="check-label"><input type="checkbox" id="focus-route">Focus on selected run</label>
+          <label class="check-label"><input type="checkbox" id="show-obstacles">Show checked obstacle boxes</label>
+          <button class="secondary" id="return-cad" type="button">Choose another run</button>
+        </section>
+        <div id="route-plot"></div><p id="route-legend" class="hint">Orange is the original route. Green is the suggestion. Drag to rotate. Lines show pipe centers. Checks include thickness.</p>
+      </div>
+      <div class="panel"><h2>Checks and designer review</h2><div id="issues"><p>Run the checks to see findings.</p></div><div id="exports" class="links" hidden></div></div>
+      <details class="panel"><summary>Route coordinates and input data</summary><p class="hint">Edit a layout here or save it to share. Connections are specified separately from the route points.</p><textarea id="layout-json" spellcheck="false" aria-label="Layout JSON"></textarea><div class="links"><button id="apply-json" class="secondary">Apply edited layout</button><button id="save-layout" class="secondary">Save layout</button></div></details>
+    </section>
+  </main>
+
+  <main id="cad-view" class="workspace" hidden>
+    <aside class="panel controls">
+      <h2>Read a real drawing</h2><p class="muted">Explore the geometry extracted from a DXF. This view does not automatically establish pipe connections or design compliance.</p>
+      <label for="cad-units">Assume source coordinates are</label><select id="cad-units"><option value="mm">Millimetres</option><option value="m">Metres</option><option value="in">Inches</option></select>
+      <label for="cad-sample">Organizer drawing on this computer</label><select id="cad-sample"></select>
+      <button id="load-cad-sample" class="primary" type="button">Load organizer drawing</button>
+      <button id="choose-cad" class="secondary" type="button">Open a DXF file</button><input type="file" accept=".dxf" id="cad-file" hidden>
+      <p class="hint">For DWG files first export a DXF with ODA File Converter. Original files stay unchanged.</p>
+      <div id="cad-status" class="hint" aria-live="polite"></div>
+      <div id="network-status" class="hint" aria-live="polite"></div>
+      <label for="cad-filter">Find a candidate</label><input id="cad-filter" type="search" placeholder="Try bent or a source handle">
+      <label for="cad-axis">Inspect a possible pipe axis</label><select id="cad-axis"><option value="">Whole drawing</option></select><div id="cad-axis-info" class="hint"></div>
+      <section id="cad-test-controls">
+        <h2>Test this run</h2>
+        <p class="hint">Choose a joined chain or a single run above. Chains join matching ends of the same inferred diameter. The search stops joining at uncertain branches. Nearby extracted objects become obstacle boxes.</p>
+        <label for="cad-system">System behavior</label><select id="cad-system"><option value="pressurized">Pressure pipe</option><option value="gravity">Gravity drain</option></select>
+        <div class="fields">
+          <div><label for="cad-clearance">Clearance mm</label><input id="cad-clearance" type="number" min="0" value="50" step="any"></div>
+          <div><label for="cad-padding">Room to reroute mm</label><input id="cad-padding" type="number" min="1" value="500" step="any"></div>
+        </div>
+        <label class="check-label"><input id="cad-reverse" type="checkbox">Reverse start and end</label>
+        <p class="hint">The test area is a local box around the run. It is not a verified ship boundary. Pipe identity and connections still need review.</p>
+        <button class="primary" id="prepare-cad" type="button" disabled>Use this run in tester</button>
+        <p id="prepare-status" class="hint" aria-live="polite">Select a run to prepare a test.</p>
+      </section>
+    </aside>
+    <section class="results">
+      <div class="panel summary"><span class="eyebrow">REAL DRAWING / ASSUMED UNITS</span><h2 id="cad-title">Choose a drawing</h2><p id="cad-summary" class="muted">The original surfaces will appear here when they can be extracted.</p></div>
+      <div class="panel plot-panel"><div id="cad-plot"></div><p class="hint">Geometry comes from the drawing. Highlighted axes are geometric candidates. They are not verified pipe networks.</p></div>
+      <div class="panel"><h2>Import findings</h2><div id="cad-warnings"></div><div id="cad-export" class="links"></div></div>
+    </section>
+  </main>
+  <footer>Local prototype. The Mac is the current development machine. The provided laptop is the main demo target.</footer>
+</body>
+</html>

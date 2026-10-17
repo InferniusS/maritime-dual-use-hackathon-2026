@@ -1,4 +1,4 @@
-# Local environment files; keep a shareable example available.
+# Local environment files. Keep a shareable example available.
 .env
 .env.*
 !.env.example
@@ -38,3 +38,8 @@ coverage/
 .DS_Store
 .AppleDouble
 ._*
+
+# Supplied models and generated working files.
+data/raw/
+data/generated/
+*.FCStd1

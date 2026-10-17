@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "prototype-pressure",
+      "name": "Prototype pressure pipe",
+      "system_type": "pressurized",
+      "units": "mm",
+      "status": "provisional",
+      "rules": {
+        "clearance": 50,
+        "grid_step": 250,
+        "bend_penalty": 300
+      },
+      "assumptions": [
+        "All coordinates and linear dimensions are interpreted as millimeters for this prototype. The supplied drawing units have not been confirmed.",
+        "The 50 mm clearance is a chosen demo value. It is not a general industry standard or an organizer requirement.",
+        "Clearance is measured from the pipe outer surface to the modeled obstacle or routing boundary. Insulation is not included unless already represented in the input outer diameter.",
+        "The 250 mm grid spacing controls search resolution. It is not a physical pipe or fitting dimension.",
+        "Each direction change adds 300 mm to the search score. This is a preference used to compare routes and does not add to physical route length.",
+        "Connections and pipe outer diameter remain fixed. No hydraulic performance or material suitability is established by this profile."
+      ]
+    },
+    {
+      "id": "prototype-gravity",
+      "name": "Prototype gravity drain",
+      "system_type": "gravity",
+      "units": "mm",
+      "status": "provisional",
+      "rules": {
+        "clearance": 50,
+        "grid_step": 250,
+        "bend_penalty": 300,
+        "min_slope": 0.01
+      },
+      "assumptions": [
+        "All coordinates and linear dimensions are interpreted as millimeters for this prototype. The supplied drawing units have not been confirmed.",
+        "The 50 mm clearance is a chosen demo value. It is not a general industry standard or an organizer requirement.",
+        "Clearance is measured from the pipe outer surface to the modeled obstacle or routing boundary. Insulation is not included unless already represented in the input outer diameter.",
+        "The 250 mm grid spacing and 300 mm bend penalty are search settings. They are not manufacturing dimensions.",
+        "The assumed minimum slope is 0.01 units of vertical fall per unit of horizontal travel. This is 1 percent or 10 mm per horizontal meter. It is a demo assumption rather than an approved drain requirement.",
+        "Flow is assumed to run from the input start connection to the end connection. Positive z is upward. The actual flow direction must be supplied correctly.",
+        "This profile records requirements for the prototype. A profile alone does not establish that every listed check or fitting is implemented.",
+        "Drain sizing and venting are not established by passing a geometric slope check."
+      ]
+    }
+  ],
+  "fittings": [
+    {
+      "id": "weldbend-lr90-std-nps1",
+      "manufacturer": "Weldbend",
+      "description": "90 degree long radius butt-weld elbow from the STD catalog table",
+      "nominal_size": "NPS 1",
+      "outer_diameter_mm": 33.4,
+      "wall_thickness_mm": 3.38,
+      "center_to_end_mm": 38,
+      "angle_deg": 90,
+      "source_url": "https://www.weldbend.com/Catalog_63_English_Metric.pdf",
+      "source_section": "90 degree elbows, long radius, schedule STD",
+      "source_accessed": "2026-10-16",
+      "notes": [
+        "NPS 1 is a nominal pipe size. The outside diameter is 33.4 mm rather than 25.4 mm.",
+        "38 mm is the catalog center-to-end dimension C. A separate bend radius is not recorded because the source table does not label it as one.",
+        "This is dimensional reference data. Suitability for the supplied ship system and current stock availability have not been verified."
+      ]
+    },
+    {
+      "id": "weldbend-lr90-std-nps2",
+      "manufacturer": "Weldbend",
+      "description": "90 degree long radius butt-weld elbow from the STD catalog table",
+      "nominal_size": "NPS 2",
+      "outer_diameter_mm": 60.3,
+      "wall_thickness_mm": 3.91,
+      "center_to_end_mm": 76,
+      "angle_deg": 90,
+      "source_url": "https://www.weldbend.com/Catalog_63_English_Metric.pdf",
+      "source_section": "90 degree elbows, long radius, schedule STD",
+      "source_accessed": "2026-10-16",
+      "notes": [
+        "NPS 2 is a nominal pipe size. The outside diameter is 60.3 mm rather than 50.8 mm.",
+        "76 mm is the catalog center-to-end dimension C. A separate bend radius is not recorded because the source table does not label it as one.",
+        "This is dimensional reference data. Suitability for the supplied ship system and current stock availability have not been verified."
+      ]
+    },
+    {
+      "id": "weldbend-lr90-std-nps3",
+      "manufacturer": "Weldbend",
+      "description": "90 degree long radius butt-weld elbow from the STD catalog table",
+      "nominal_size": "NPS 3",
+      "outer_diameter_mm": 88.9,
+      "wall_thickness_mm": 5.49,
+      "center_to_end_mm": 114,
+      "angle_deg": 90,
+      "source_url": "https://www.weldbend.com/Catalog_63_English_Metric.pdf",
+      "source_section": "90 degree elbows, long radius, schedule STD",
+      "source_accessed": "2026-10-16",
+      "notes": [
+        "NPS 3 is a nominal pipe size. The outside diameter is 88.9 mm rather than 76.2 mm.",
+        "114 mm is the catalog center-to-end dimension C. A separate bend radius is not recorded because the source table does not label it as one.",
+        "This is dimensional reference data. Suitability for the supplied ship system and current stock availability have not been verified."
+      ]
+    },
+    {
+      "id": "weldbend-lr90-std-nps4",
+      "manufacturer": "Weldbend",
+      "description": "90 degree long radius butt-weld elbow from the STD catalog table",
+      "nominal_size": "NPS 4",
+      "outer_diameter_mm": 114.3,
+      "wall_thickness_mm": 6.02,
+      "center_to_end_mm": 152,
+      "angle_deg": 90,
+      "source_url": "https://www.weldbend.com/Catalog_63_English_Metric.pdf",
+      "source_section": "90 degree elbows, long radius, schedule STD",
+      "source_accessed": "2026-10-16",
+      "notes": [
+        "NPS 4 is a nominal pipe size. The outside diameter is 114.3 mm rather than 101.6 mm.",
+        "152 mm is the catalog center-to-end dimension C. A separate bend radius is not recorded because the source table does not label it as one.",
+        "This is dimensional reference data. Suitability for the supplied ship system and current stock availability have not been verified."
+      ]
+    }
+  ],
+  "notices": [
+    "These profiles are editable prototype settings. They are not official ship rules or a declaration of standards compliance.",
+    "Changing a units label is not a unit conversion. When the source units are confirmed, convert all coordinates and linear dimensions consistently before running checks again.",
+    "Do not change the physical size of a source pipe to match an entry in this small fitting catalog. An unmatched diameter requires an appropriate fitting record or human review.",
+    "The catalog records do not establish an allowed material or pressure class for the challenge. They do not include fabrication tolerances or weld access allowances.",
+    "A centerline turn is not a complete fitting model. The full fitting envelope still needs a collision check before a route can be treated as buildable."
+  ]
+}

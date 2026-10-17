@@ -1,0 +1,109 @@
+{
+  "scenarios": [
+    {
+      "id": "equipment-detour",
+      "title": "Shorter route around equipment",
+      "description": "A valid pipe takes a long route around a full-height equipment bank.",
+      "layout": "scenarios/equipment-detour.json",
+      "expected": {
+        "status": "improved",
+        "original_valid": true,
+        "candidate_valid": true,
+        "length_mm": 8000,
+        "bends": 2,
+        "vertical_detour": false
+      },
+      "explanation": "The original route is 10500 mm with four turns. The equipment reaches y=1750. Pipe radius plus sample clearance is 200 mm so the first usable grid line is y=2000. A 5000 mm crossing plus two 1500 mm detours gives 8000 mm with two turns."
+    },
+    {
+      "id": "already-shortest",
+      "title": "Already shortest",
+      "description": "A clear straight pipe should stay as it is.",
+      "layout": "scenarios/already-shortest.json",
+      "expected": {
+        "status": "unchanged",
+        "original_valid": true,
+        "candidate_valid": true,
+        "length_mm": 5000,
+        "bends": 0,
+        "vertical_detour": false
+      },
+      "explanation": "The endpoints differ by 5000 mm on the x axis only. A straight segment has that length and no turns. Any detour must be at least as long so keeping the original is the expected result."
+    },
+    {
+      "id": "collision-repair",
+      "title": "Repair an equipment collision",
+      "description": "The original straight pipe passes through equipment and needs a valid detour.",
+      "layout": "scenarios/collision-repair.json",
+      "expected": {
+        "status": "improved",
+        "original_valid": false,
+        "candidate_valid": true,
+        "length_mm": 8000,
+        "bends": 2,
+        "vertical_detour": false
+      },
+      "explanation": "The original 5000 mm straight route crosses the equipment bank. The first clear grid line is y=2000 after adding the 200 mm radius and sample clearance margin. The valid detour is 8000 mm with two turns. Fixing this collision requires more pipe than the invalid original."
+    },
+    {
+      "id": "vertical-detour",
+      "title": "Rise over an obstacle",
+      "description": "Equipment spans the full room width so the pipe must change height.",
+      "layout": "scenarios/vertical-detour.json",
+      "expected": {
+        "status": "improved",
+        "original_valid": false,
+        "candidate_valid": true,
+        "length_mm": 7000,
+        "bends": 2,
+        "vertical_detour": true
+      },
+      "explanation": "The obstacle spans the whole y range and reaches up to z=1750. With the 200 mm radius and sample clearance margin the pipe must pass above z=1950. The first usable grid height is z=2000. Raising and lowering the pipe by 1000 mm adds 2000 mm to the 5000 mm crossing. The route is 7000 mm with two turns."
+    },
+    {
+      "id": "sealed-partition",
+      "title": "Blocked by a sealed partition",
+      "description": "A full-width and full-height partition separates the two connections.",
+      "layout": "scenarios/sealed-partition.json",
+      "expected": {
+        "status": "no_route",
+        "original_valid": false,
+        "candidate_valid": null,
+        "length_mm": null,
+        "bends": null,
+        "vertical_detour": false
+      },
+      "explanation": "The partition spans the complete room width and height. Every route between the endpoints must cross its x range. The original crosses the partition and there is no permitted passage through it. The search should report no route on its grid without inventing a connection."
+    },
+    {
+      "id": "narrow-gap-small-pipe",
+      "title": "Small pipe fits the gap",
+      "description": "A 100 mm pipe passes through a 300 mm gap under the sample clearance rule.",
+      "layout": "scenarios/narrow-gap-small-pipe.json",
+      "expected": {
+        "status": "unchanged",
+        "original_valid": true,
+        "candidate_valid": true,
+        "length_mm": 5000,
+        "bends": 0,
+        "vertical_detour": false
+      },
+      "explanation": "The gap runs from y=1850 to y=2150 and is 300 mm wide. A 100 mm pipe with 50 mm clearance on each side needs 200 mm. Its centerline at y=2000 is 150 mm from each wall and exceeds the required 100 mm radius and clearance margin. The 5000 mm straight route is valid."
+    },
+    {
+      "id": "narrow-gap-large-pipe",
+      "title": "Larger pipe cannot fit",
+      "description": "The same gap cannot fit a 250 mm pipe with the same sample clearance.",
+      "layout": "scenarios/narrow-gap-large-pipe.json",
+      "expected": {
+        "status": "no_route",
+        "original_valid": false,
+        "candidate_valid": null,
+        "length_mm": null,
+        "bends": null,
+        "vertical_detour": false
+      },
+      "explanation": "The geometry matches the small-pipe case. The 250 mm pipe plus two 50 mm clearances needs 350 mm but the gap is only 300 mm wide. Each centerline margin is 175 mm so the inflated partition boxes overlap. Both partitions extend through the full height. There is no alternative passage and the pipe diameter must stay fixed."
+    }
+  ]
+}

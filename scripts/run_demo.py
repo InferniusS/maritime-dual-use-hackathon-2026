@@ -1,0 +1,313 @@
+"""Run a single-pipe workflow and write an offline review report."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import datetime, timezone
+import hashlib
+import html
+import json
+from pathlib import Path
+import platform
+import sys
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+import ezdxf
+from ezdxf import units
+import plotly.graph_objects as go
+
+from pipe_router.workflow import run_workflow
+
+
+def display_layout(layout, result):
+    """Use the normalized geometry so plots and CAD exports share result units."""
+    normalized = result.get("normalized_layout", layout)
+    if normalized.get("units") != "mm":
+        raise ValueError("Report geometry must be normalized to millimeters before rendering")
+    return normalized
+
+
+def box_vertices(box):
+    low, high = box["min"], box["max"]
+    return [
+        [low[0], low[1], low[2]], [high[0], low[1], low[2]],
+        [high[0], high[1], low[2]], [low[0], high[1], low[2]],
+        [low[0], low[1], high[2]], [high[0], low[1], high[2]],
+        [high[0], high[1], high[2]], [low[0], high[1], high[2]],
+    ]
+
+
+def add_box(figure, box, name, color, opacity):
+    points = box_vertices(box)
+    triangles = [(0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6),
+                 (0, 4, 5), (0, 5, 1), (1, 5, 6), (1, 6, 2),
+                 (2, 6, 7), (2, 7, 3), (3, 7, 4), (3, 4, 0)]
+    figure.add_trace(go.Mesh3d(
+        x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+        i=[t[0] for t in triangles], j=[t[1] for t in triangles], k=[t[2] for t in triangles],
+        name=name, color=color, opacity=opacity, flatshading=True, showlegend=True,
+        hovertemplate=name + "<extra></extra>",
+    ))
+
+
+def make_figure(layout, result):
+    layout = display_layout(layout, result)
+    figure = go.Figure()
+    vertices = box_vertices(layout["bounds"])
+    edges = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6),
+             (6, 7), (7, 4), (0, 4), (1, 5), (2, 6), (3, 7)]
+    outline = [p for a, b in edges for p in (vertices[a], vertices[b], [None] * 3)]
+    figure.add_trace(go.Scatter3d(
+        x=[p[0] for p in outline], y=[p[1] for p in outline], z=[p[2] for p in outline],
+        mode="lines", line={"color": "#71839b", "width": 2},
+        name="Assumed local search area" if layout.get("cad_context") else "Supplied routing boundary",
+        hoverinfo="skip",
+    ))
+    for obstacle in layout["obstacles"]:
+        add_box(figure, obstacle, "Obstacle: " + html.escape(obstacle["id"]), "#8394ab", 0.55)
+
+    for key, label, color, dash in (
+        ("original", "Original route", "#f5a55b", "dash"),
+        ("candidate", "Suggested route", "#26d2b3", "solid"),
+    ):
+        route = result.get(key)
+        if route is None:
+            continue
+        points = route["points"]
+        figure.add_trace(go.Scatter3d(
+            x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+            mode="lines+markers", name=label,
+            line={"color": color, "width": 7, "dash": dash},
+            marker={"size": 3, "color": color},
+            hovertemplate=label + "<br>x %{x} mm<br>y %{y} mm<br>z %{z} mm<extra></extra>",
+        ))
+    for index, record in enumerate(layout.get("protected_endpoints", [])):
+        points = record["points"]
+        figure.add_trace(go.Scatter3d(
+            x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+            mode="lines", name="Fixed end sections", legendgroup="fixed-sections",
+            showlegend=index == 0, line={"color": "#ffd166", "width": 10},
+            hovertemplate="Fixed " + record["endpoint"] + " section<br>x %{x} mm<br>y %{y} mm<br>z %{z} mm<extra></extra>",
+        ))
+    points = [layout["pipe"]["start"], layout["pipe"]["end"]]
+    figure.add_trace(go.Scatter3d(
+        x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+        mode="markers+text", text=["Start", "End"], textposition="top center",
+        marker={"color": "#fff0b3", "size": 6}, name="Fixed connections",
+        hovertemplate="%{text}<br>x %{x} mm<br>y %{y} mm<br>z %{z} mm<extra></extra>",
+    ))
+    axis = {"backgroundcolor": "#102035", "gridcolor": "#23364c", "showbackground": True}
+    figure.update_layout(
+        template="plotly_dark", paper_bgcolor="#102035", plot_bgcolor="#102035",
+        height=560, margin={"l": 5, "r": 5, "t": 10, "b": 5},
+        legend={"orientation": "h", "y": 1.08, "x": 0},
+        scene={"aspectmode": "data", "camera": {"eye": {"x": 1.5, "y": 1.7, "z": 1.1}},
+               "xaxis": {**axis, "title": "x / mm"},
+               "yaxis": {**axis, "title": "y / mm"},
+               "zaxis": {**axis, "title": "z / mm"}},
+    )
+    return figure
+
+
+def write_dxf(layout, result, destination):
+    """Export centerlines only. This is not a pipe solid or a fitting model."""
+    layout = display_layout(layout, result)
+    synthetic = layout.get("provenance") == "synthetic"
+    prefix = "SYNTHETIC" if synthetic else "CAD_DERIVED"
+    document = ezdxf.new("R2018")
+    document.units = units.MM
+    document.header["$MEASUREMENT"] = 1
+    space = document.modelspace()
+    for key, color in (("original", 30), ("candidate", 4)):
+        if result.get(key) is None:
+            continue
+        layer = prefix + "_" + key.upper() + "_CENTERLINE"
+        document.layers.add(layer, color=color)
+        space.add_polyline3d(result[key]["points"], dxfattribs={"layer": layer})
+    if layout.get("protected_endpoints"):
+        fixed_layer = prefix + "_FIXED_END_SECTIONS"
+        document.layers.add(fixed_layer, color=2)
+        for record in layout["protected_endpoints"]:
+            space.add_polyline3d(record["points"], dxfattribs={"layer": fixed_layer})
+    obstacle_layer = prefix + "_OBSTACLE"
+    document.layers.add(obstacle_layer, color=8)
+    for obstacle in layout["obstacles"]:
+        points = box_vertices(obstacle)
+        for indices in ((0, 1, 2, 3, 0), (4, 5, 6, 7, 4), (0, 4), (1, 5), (2, 6), (3, 7)):
+            space.add_polyline3d([points[i] for i in indices], dxfattribs={"layer": obstacle_layer})
+    label = "SYNTHETIC TEST ONLY" if synthetic else "CAD-DERIVED PROTOTYPE REVIEW"
+    if layout.get("benchmark", {}).get("synthetic_mutation"):
+        label = "CONTROLLED DETOUR TEST. Artificial detour added to CAD-derived geometry"
+    space.add_text(f"{label}. Centerlines in mm. Unverified rules. Source CAD has not been modified.", dxfattribs={"height": max(2, layout["pipe"]["diameter"])})
+    document.saveas(destination)
+
+
+def write_html(layout, result, elapsed, destination):
+    layout = display_layout(layout, result)
+    escape = html.escape
+    synthetic = layout.get("provenance") == "synthetic"
+    benchmark = layout.get("benchmark", {})
+    controlled_detour = benchmark.get("synthetic_mutation") is True
+    gravity = layout.get("system_type") == "gravity"
+    original, candidate = result["original"], result["candidate"]
+    def metric(route, key):
+        if route is None:
+            return "No accepted route"
+        if key == "valid":
+            return "Pass implemented checks" if route[key] else "Needs attention"
+        return f"{route[key]:,.0f}" + (" mm" if key == "length" else "")
+    rows = "".join(
+        f"<tr><th>{label}</th><td>{metric(original, key)}</td><td>{metric(candidate, key)}</td></tr>"
+        for label, key in (("Route length", "length"), ("Direction changes", "bends"), ("Implemented checks", "valid"))
+    )
+    points = "" if candidate is None else "".join(
+        "<tr><td>" + str(i + 1) + "</td>" + "".join(f"<td>{value:g}</td>" for value in point) + "</tr>"
+        for i, point in enumerate(candidate["points"])
+    )
+    issue_items = []
+    for key, label in (("original", "Original"), ("candidate", "Suggested")):
+        if result.get(key):
+            issue_items.extend(f"<li>{label}: {escape(issue['message'])}</li>" for issue in result[key]["issues"])
+    issues = "<ul>" + "".join(issue_items) + "</ul>" if issue_items else "<p>No issues found by the implemented checks.</p>"
+    assumptions = list(dict.fromkeys(layout.get("assumptions", []) + result.get("assumptions", [])))
+    limits = result.get("limitations", [])
+    assumption_list = "".join(f"<li>{escape(item)}</li>" for item in assumptions)
+    limitation_list = "".join(f"<li>{escape(item)}</li>" for item in limits)
+    plot = make_figure(layout, result).to_html(
+        full_html=False, include_plotlyjs=True, div_id="route-view",
+        config={"responsive": True, "displaylogo": False, "displayModeBar": False, "scrollZoom": False,
+                "modeBarButtonsToRemove": ["sendChartToCloud"]},
+    )
+    saved = original["length"] - candidate["length"] if candidate else 0
+    if candidate and original["length"] > 0:
+        context = "test" if synthetic else "review"
+        headline = f"{saved:,.0f} mm shorter in this {context}" if saved > 0 else "Route review complete"
+    else:
+        headline = "No accepted route from this search"
+    provenance_tag = "SYNTHETIC TEST" if synthetic else "CAD-DERIVED REVIEW"
+    benchmark_panel = ""
+    if controlled_detour:
+        provenance_tag = "CONTROLLED DETOUR TEST"
+        headline = f"{saved:,.0f} mm removed from an artificial detour" if candidate and saved > 0 else "Controlled detour test"
+        baseline_length = benchmark.get("baseline", {}).get("validation", {}).get("length")
+        baseline_text = ""
+        if isinstance(baseline_length, (int, float)):
+            baseline_text = f"<p><strong>Unchanged CAD baseline: {baseline_length:,.0f} mm</strong></p>"
+            if candidate and candidate["length"] > baseline_length:
+                baseline_text += f"<p>The suggested route is still {candidate['length'] - baseline_length:,.0f} mm longer than that baseline. This result shows recovery from an added detour. It does not show an improvement over the unchanged CAD route.</p>"
+        benchmark_panel = (
+            '<section class="panel controlled"><h2>Artificial detour added for this test</h2>'
+            '<p>The added detour is not a defect found in the source drawing. The source CAD has not been edited.</p>'
+            + baseline_text + '</section>'
+        )
+    provenance_text = (
+        "The geometry is invented for testing. It is not the supplied ship model."
+        if synthetic else
+        "The input is marked as derived from CAD. Its extraction method and completeness still need review against the source drawing."
+    )
+    system_text = "Gravity drain" if gravity else "Pressurized pipe"
+    boundary_text = "an assumed local search area" if layout.get("cad_context") else "the supplied boundary"
+    coverage_text = f"Checks cover fixed endpoints and {boundary_text}. They check the pipe plus selected clearance against the obstacle boxes."
+    if layout.get("protected_endpoints"):
+        coverage_text += " Yellow end sections must remain unchanged. Contact with their listed connection objects is allowed only along those fixed sections. The movable route still checks every obstacle. Connection identities remain assumptions."
+    if gravity:
+        coverage_text += f" Each segment is checked for downhill flow and the selected minimum slope of {layout['rules']['min_slope']:g} in the start-to-end direction. Positive Z is assumed to point upward."
+    else:
+        coverage_text += " New pressure route suggestions use axis-aligned segments."
+    if not synthetic:
+        coverage_text += " Existing CAD centerlines retain their supplied directions and samples. Direction changes are not verified fitting counts. Route comparisons use polyline length only."
+    if "bend_radius" in layout["rules"]:
+        coverage_text += " Available tangent length is checked against the selected bend radius. Actual curved fitting volumes are not checked."
+    source_units = escape(str(result.get("input_units", layout["units"])))
+    export_text = "synthetic centerlines and obstacle outlines" if synthetic else "CAD-derived review centerlines and the supplied obstacle outlines"
+    content = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipe route review</title>
+<style>
+* {{ box-sizing: border-box }}
+body {{ margin: 0; background: #091421; color: #e5edf6; font-family: system-ui, sans-serif; line-height: 1.6 }}
+main {{ max-width: 1120px; margin: auto; padding: 32px 22px 70px }}
+h1 {{ font-size: clamp(26px, 4vw, 40px); line-height: 1.15; margin: 16px 0 }}
+h2 {{ font-size: 21px; margin-top: 0 }}
+p {{ max-width: 850px }}
+.tag {{ color: #ffd493; font-weight: 700; letter-spacing: .08em; font-size: 12px }}
+.muted {{ color: #afbed0 }}
+.panel {{ margin-top: 24px; padding: 24px; background: #102035; border: 1px solid #253850; border-radius: 14px }}
+.controlled {{ border-color: #9d7538; background: #282416 }}
+.columns {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px }}
+table {{ width: 100%; border-collapse: collapse; text-align: left }}
+th,td {{ border-bottom: 1px solid #2c4058; padding: 12px 8px }}
+thead th {{ color: #afbed0 }}
+li {{ margin-bottom: 10px }}
+a {{ color: #55dcc8 }}
+.plot {{ overflow: hidden; padding: 10px }}
+.pill {{ display: inline-block; background: #24354b; padding: 4px 10px; border-radius: 7px }}
+@media(max-width: 760px) {{ .columns {{ grid-template-columns: 1fr }} .panel {{ padding: 16px }} }}
+</style></head><body><main>
+<span class="tag">TRACK 2 / {provenance_tag}</span>
+<h1>{headline}</h1>
+<p>{escape(layout.get('name', 'Pipe layout'))}. {provenance_text} The selected rule values are provisional. This report does not certify compliance with engineering standards.</p>
+<p class="muted">{system_text}. Fixed connections. Same {layout['pipe']['diameter']:g} mm outer diameter. Selected clearance {layout['rules']['clearance']:g} mm. Declared input units {source_units}. This report uses millimeters.</p>
+{benchmark_panel}
+<div class="panel"><table><thead><tr><th>Measure</th><th>Original</th><th>Suggested</th></tr></thead><tbody>{rows}</tbody></table>
+<p class="muted">{coverage_text}</p></div>
+<div class="panel plot">{plot}</div>
+<p class="muted">Drag to rotate. Click a legend item to hide it. Lines show pipe centers. The collision check also accounts for pipe thickness.</p>
+<div class="columns"><section class="panel"><h2>Check results</h2>{issues}
+<p>These checks do not confirm fitting availability or hydraulic performance. Every corner and connection still needs designer review.</p>
+<p class="muted">{escape(result['search']['reason'])}</p>
+<p class="muted">Search finished in {elapsed:.3f} seconds on this computer. This is not a hardware comparison.</p></section>
+<section class="panel"><h2>Suggested centerline points</h2><p class="muted">Coordinates in millimeters. These are route suggestions for review.</p>
+<table><thead><tr><th>Point</th><th>x</th><th>y</th><th>z</th></tr></thead><tbody>{points}</tbody></table></section></div>
+<section class="panel"><h2>Assumptions used in this review</h2><ul>{assumption_list}</ul></section>
+<section class="panel"><h2>What still needs work</h2><ul>{limitation_list}</ul>
+<p>Review the source geometry and unit assumptions before interpreting real dimensions. The selected clearance and slope values remain prototype rules.</p></section>
+<p><a href="result.json">Full result and inputs</a> &nbsp; <a href="route-centerlines.dxf">Centerlines for CAD review</a></p>
+<p class="muted">The DXF contains {export_text}. It does not modify the source ship drawing or contain finished pipe solids and fittings. The report works offline.</p>
+</main></body></html>"""
+    destination.write_text(content, encoding="utf-8")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--layout", type=Path, default=ROOT / "examples" / "test-room.json")
+    parser.add_argument("--output", type=Path, default=ROOT / "data" / "generated" / "first-route-demo")
+    args = parser.parse_args()
+    source = args.layout.resolve()
+    output = args.output.resolve()
+    targets = [output / name for name in ("result.json", "index.html", "route-centerlines.dxf")]
+    if source in [target.resolve() for target in targets]:
+        parser.error("Choose an output folder that will not overwrite the input layout.")
+    try:
+        raw = source.read_bytes()
+        layout = json.loads(raw)
+        start = time.perf_counter()
+        result = run_workflow(layout)
+        elapsed = time.perf_counter() - start
+        normalized = result["normalized_layout"]
+        output.mkdir(parents=True, exist_ok=True)
+        report = {"generated_at": datetime.now(timezone.utc).isoformat(),
+                  "input_sha256": hashlib.sha256(raw).hexdigest(), "source_layout": layout,
+                  "layout": normalized,
+                  "result": result, "runtime_seconds": elapsed,
+                  "runtime": {"os": platform.system(), "architecture": platform.machine(),
+                              "python": platform.python_version()}}
+        targets[0].write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+        write_dxf(normalized, result, targets[2])
+        write_html(normalized, result, elapsed, targets[1])
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        parser.exit(2, f"Cannot generate demo: {exc}\n")
+    print(f"{normalized['provenance']} review result: {result['status']}")
+    for key in ("original", "candidate"):
+        route = result.get(key)
+        if route:
+            print(f"{key}: {route['length']:g} mm / {route['bends']} direction changes / checks {route['valid']}")
+    print(f"Report: {targets[1]}")
+    print("Prototype rules only. Official compliance and source geometry completeness are not verified.")
+
+
+if __name__ == "__main__":
+    main()

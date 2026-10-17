@@ -1,0 +1,9 @@
+# Direct project dependencies. Setup scripts install the complete pinned lock file.
+# Supported interpreter: CPython 3.14.x.
+-c requirements-lock.txt
+numpy==2.5.4
+scipy==1.18.1
+networkx==3.7
+ezdxf==1.4.5
+plotly==7.1.0
+pytest==9.1.1

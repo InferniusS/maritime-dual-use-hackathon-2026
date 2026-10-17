@@ -1,0 +1,72 @@
+{
+  "name": "Repair a straight route that crosses equipment",
+  "provenance": "synthetic",
+  "units": "mm",
+  "system_type": "pressurized",
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      6000,
+      4000,
+      3000
+    ]
+  },
+  "obstacles": [
+    {
+      "id": "equipment-bank",
+      "min": [
+        2500,
+        0,
+        0
+      ],
+      "max": [
+        3500,
+        1750,
+        3000
+      ]
+    }
+  ],
+  "pipe": {
+    "start": [
+      500,
+      500,
+      1000
+    ],
+    "end": [
+      5500,
+      500,
+      1000
+    ],
+    "diameter": 100,
+    "original_route": [
+      [
+        500,
+        500,
+        1000
+      ],
+      [
+        5500,
+        500,
+        1000
+      ]
+    ]
+  },
+  "rules": {
+    "clearance": 150,
+    "grid_step": 250,
+    "bend_penalty": 300
+  },
+  "assumptions": [
+    "This room and pipe are invented for testing. They are not extracted from the supplied ship drawings.",
+    "Millimeters are chosen for this example. The supplied drawings still have unconfirmed units.",
+    "The 150 mm clearance is a test value. It is not an organizer requirement.",
+    "The 100 mm diameter represents the pipe's outer diameter. Insulation is not included.",
+    "The box is a permitted routing space. The equipment bank is the only modeled obstacle.",
+    "Each direction change adds 300 mm to the search score. This is a tunable preference rather than a physical length.",
+    "The example represents one pressurized pipe. It has no drain slope requirement."
+  ]
+}
