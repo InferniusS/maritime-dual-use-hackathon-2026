@@ -2,11 +2,11 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current direction on October 17:** use the tool inside AutoCAD. The plugin connects the drawing to our existing Python routing code. The browser app is still available for testing and as a demo fallback. The plugin still needs a live check in AutoCAD on the event laptop.
+**Current status on October 17:** the simple line workflow has run inside AutoCAD on the Snapdragon laptop. The team saved green review centerline `82` on `MARITIME_SUGGESTION`. Next we need to test the real cooling drawing through `MARITIMECAD`. The browser app remains available as a fallback.
 
 ## Start with AutoCAD
 
-**At the venue start with the [Snapdragon guide](docs/snapdragon-guide.md).** It gives each command separately and walks through the AutoCAD test. AutoCAD 2027 is already installed on the team laptop. The plugin still needs its first live test there.
+**At the venue start with the [Snapdragon guide](docs/snapdragon-guide.md).** It gives each command separately and walks through the AutoCAD test. AutoCAD 2027 is installed and the simple line test has worked there. Continue with the real drawing steps once that test is complete.
 
 The [plugin guide](autocad-plugin/README.md) explains the commands and optional source build. The short version is:
 
@@ -108,7 +108,7 @@ Efe's Mac is already set up and only needs the second command. If Python is not 
 
 Keep the terminal running. The plugin uses [http://127.0.0.1:8767/](http://127.0.0.1:8767/) on the same computer. That address will not connect to Efe's Mac from the venue. A browser is optional when using the plugin.
 
-The Windows packages were checked for ARM64 availability. The actual installation and AutoCAD workflow still need verification on the event laptop. Recreate the environment there instead of copying the Mac's `.venv`.
+The local Python service and simple line command have now worked together on the Snapdragon laptop. The real drawing command still needs a venue test. Create the environment on each laptop instead of copying the Mac's `.venv`.
 
 ## Browser fallback
 
@@ -124,8 +124,8 @@ Original organizer files stay outside Git. Get those from [the organizer Drive f
 
 ## What comes next
 
-1. Load the plugin on the event laptop and check a real drawing through AutoCAD.
-2. Confirm the result appears at the right scale and position. Try keeping a review centerline and undoing it.
+1. Open the Fresh Water Cooling Auxiliaries drawing and run `MARITIMECAD` on a supported pipe solid or block.
+2. Check the selected route and its endpoints at the correct scale. Also verify Undo on the saved simple test centerline.
 3. Preserve branch connections and required equipment through longer routes.
 4. Include more surrounding geometry and check actual fitting shapes.
 5. Demonstrate an improvement on a reviewed real problem and flag anything that still needs a designer.
@@ -143,7 +143,7 @@ The Mac is our development machine. The Snapdragon laptop is the AutoCAD demo ta
 - [Units and rule assumptions](docs/assumptions.md)
 - [Packages and setup details](docs/dependencies.md)
 
-Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows. A successful test run or DLL build does not verify that the plugin loads in AutoCAD. That check must happen on the demo laptop.
+Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows. The simple line workflow and review centerline save are now confirmed on the demo laptop. The real solid workflow and Undo still need live verification.
 
 ## Team
 
@@ -156,4 +156,4 @@ Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -
 
 Codex generated the initial README and `.gitignore` before challenge implementation. During the event Codex generated the initial prototype code in `pipe_router/` and `web/` along with the scripts and examples and tests. Codex also helped extend the AutoCAD integration and write this documentation. All initial code in those new prototype files was AI generated. The exact model build was not recorded.
 
-Automated validation has run on the Mac. Human code review and final CAD comparison are still pending. Event laptop and IQ9 execution have not been verified. Keep recording AI assistance as the project grows.
+Automated validation has run on the Mac. The simple line workflow and review centerline save have run on the Snapdragon laptop. Human code review and final CAD comparison are still pending. The real solid workflow and IQ9 execution remain unverified. Keep recording AI assistance as the project grows.

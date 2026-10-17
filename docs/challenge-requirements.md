@@ -23,9 +23,9 @@ The Notion page text was rechecked in the browser. Its embedded PDFs reported lo
 | Use standard commercially available fittings | Manufacturer dimensions shown as a reference. Optional bend tangent length check | Select appropriate fittings and check their full physical shapes |
 | Preserve system function and correct drain pitch | Gravity checks enforce start-to-end downhill flow and a selected minimum slope | Verify real flow direction and required slope. Add other functional checks |
 | Work across piping systems | Pressure and gravity searches exercised on eight synthetic layouts | Demonstrate reviewed real inputs and additional system rules |
-| Change the CAD model or provide precise implementation information | Centerline DXF and exact coordinates. The AutoCAD plugin can preview a suggestion and optionally add a separate review centerline. Source handles and drawing identity remain attached | Verify the plugin inside AutoCAD. Supply complete fitting changes and verify component identity |
-| Live run on the supplied model with results shown in AutoCAD or Navisworks | AutoCAD commands now call the existing local Python workflow. The snapshot API was tested with the cooling drawing. The browser workflow remains available | Load the DLL and demonstrate a reviewed real run in AutoCAD on the event laptop |
-| Run on the provided laptop | Mac execution tested | Verify the complete workflow on the event laptop |
+| Change the CAD model or provide precise implementation information | Centerline DXF and exact coordinates. The team confirmed saving a separate review centerline from the small AutoCAD line test. Source handles and drawing identity remain attached | Check real solid input and Undo inside AutoCAD. Supply complete fitting changes and verify component identity |
+| Live run on the supplied model with results shown in AutoCAD or Navisworks | Simple line routing works inside AutoCAD on the event laptop. The snapshot API was tested with the cooling drawing on the Mac. The browser workflow remains available | Demonstrate the real drawing snapshot and routing path inside AutoCAD on the event laptop |
+| Run on the provided laptop | The team confirmed the simple AutoCAD line test and saved suggestion on the Snapdragon laptop | Verify real drawing export and solid extraction and routing on that laptop |
 | Flag issues needing designer intervention | Reports identify unverified chains and endpoint contacts. Bounded unchanged connection stubs require an explicit local assumption. Source references remain attached | Review component identity and resolve unsupported engineering checks |
 
 The challenge describes AI optimization. The reviewed material does not specify training a new model or using a particular neural model. The implementation must explain its optimization approach accurately.
@@ -55,6 +55,6 @@ The current iteration has a checked three-component route from the real cooling 
 
 A clearly labeled artificial detour increases this route to 4179.25 mm. The search reduces it to 3728.30 mm. That is recovery from a generated change. It does not beat the untouched CAD baseline. The unchanged baseline remains the preferred result when tested on its own.
 
-The immediate milestone is a live AutoCAD check on the event laptop. The plugin now sends a drawing snapshot to the same Python search and brings the result back as a review centerline. The source solids remain intact. The browser app is preserved as a fallback.
+The simple line command and saving a suggested centerline have now been confirmed on the event laptop. The immediate milestone is testing `MARITIMECAD` with the real cooling drawing there. This command sends a drawing snapshot to the same Python search and brings the result back as a review centerline. The source solids remain intact. The browser app is preserved as a fallback.
 
 The remaining routing milestones are to retain equipment and branch connections through longer routes and use more complete collision geometry. Then provide fitting changes that a designer can implement. The present local box and sample-based obstacle boxes do not establish full ship coverage.

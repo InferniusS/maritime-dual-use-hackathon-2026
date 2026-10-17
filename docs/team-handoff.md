@@ -8,7 +8,7 @@ AutoCAD 2027 is already installed on the Snapdragon laptop. Follow the [step-by-
 
 Start the Python service on the same laptop as AutoCAD. Load the included `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` with `NETLOAD`. Try the small test drawing before using `MARITIMECAD` on a real pipe solid or block. The included DLL lets you try it without installing a build SDK. The [plugin reference](../autocad-plugin/README.md) also covers rebuilding and command details.
 
-The first venue milestone is a successful run inside AutoCAD. The code and service can be built and tested on the Mac. That does not prove the DLL loads on the Snapdragon laptop or that AutoCAD exports every needed object correctly.
+The first venue milestone has passed. The team ran the small line test inside AutoCAD on the Snapdragon laptop and saved a suggested centerline. The next checkpoint is `MARITIMECAD` on the real cooling drawing. This adds drawing export and solid extraction to the path already tested.
 
 If setup takes too long you can still open [the saved report](../examples/real-cad-demo/report.html) from a downloaded copy of this repo. It works offline without installation. The [README](../README.md#start-the-python-service) explains how to start the browser app and run new calculations.
 
@@ -35,7 +35,7 @@ The Python code passed 373 automated tests on the Mac. That includes 26 new test
 
 The new snapshot path also read the 26 MB cooling DXF. It extracted 21003 objects and found 40 joined candidate routes. Selecting source handle `DB2` found the same joined route used by our saved example. Running that unchanged route kept its original length of about 3679.25 mm.
 
-A full AutoCAD command run is still unverified. Loading the DLL and checking its overlays and saved centerline must happen at the venue.
+The team has now confirmed the simple line workflow inside AutoCAD on the Snapdragon laptop. Their screenshot shows the green suggestion and the command message confirming that review centerline `82` was saved on `MARITIME_SUGGESTION`. This confirms plugin loading and the line-route calculation and saving path on that laptop. Undo has not been separately confirmed. Real solid extraction through `MARITIMECAD` is the next live check.
 
 ## The saved routing result
 
@@ -65,8 +65,8 @@ Get the original drawing from [the organizer Drive folder](https://drive.google.
 
 ## Next tasks in order
 
-1. **Load the plugin on the event laptop.** Confirm AutoCAD 2027 for Windows opens the DLL through `NETLOAD`. Check that the Python service is running locally. This also checks the actual laptop and plugin compatibility.
-2. **Test the drawing workflow.** Select a supported cooling pipe object. Review the detected route and the unit assumption. Run the baseline and confirm that the overlay matches the source drawing. For a result reported as improved try saving a review centerline and undoing it. An unchanged result does not offer Save.
+1. **Test the real drawing workflow.** The simple line test and Save have passed on the event laptop. Switch to the cooling drawing and run `MARITIMECAD`. Select a supported pipe object. Review the detected route and the unit assumption. Run the baseline and confirm that the overlay matches the source drawing. An unchanged result is acceptable.
+2. **Check more local routes and Undo.** Try a longer joined route and a route in a crowded area. Verify that endpoints stay fixed and that the selected route includes the intended components. Check Undo on a saved improved result. The plugin still changes one selected route at a time.
 3. **Compare a controlled test.** Run the saved baseline and detour in the browser fallback. Confirm the baseline stays unchanged and the artificial detour becomes shorter. Compare the exported DXF with the drawing at the correct scale.
 4. **Keep all required connections.** Extend beyond one route while preserving branches and equipment connections. We must not shorten a pipe by disconnecting something in the middle.
 5. **Improve the checks.** Include surrounding structure and other systems. Replace the assumed local boundary where actual space information is available. Check fitting sizes and full shapes.
@@ -79,7 +79,7 @@ We can continue with the current unit and rule assumptions. Record corrections w
 | Device | Current role |
 | --- | --- |
 | Mac | Develop and test the Python code. Build the Windows plugin DLL. Use the browser fallback |
-| Snapdragon laptop | Run AutoCAD and the local Python service for the demo. Actual plugin execution still needs verification |
+| Snapdragon laptop | Simple line routing and Save confirmed inside AutoCAD. Real drawing extraction and routing are the next live check |
 | Dragonwing IQ9 | Optional future processing target. No service or AI processor integration is included |
 
 The program uses geometric search. It does not train a model or learn from CAD uploads. Plugging in IQ9 does not automatically speed it up. The current demo does not depend on IQ9.

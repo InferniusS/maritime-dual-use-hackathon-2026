@@ -4,7 +4,7 @@ This plugin brings the existing Python pipe router into AutoCAD. AutoCAD handles
 
 The website does not need to be open. Both the plugin and browser app use the same calculation code.
 
-**For the event laptop follow the [Snapdragon guide](../docs/snapdragon-guide.md).** It covers the full setup and test one command at a time. AutoCAD 2027 is already installed there. The plugin still needs its first live test.
+**For the event laptop follow the [Snapdragon guide](../docs/snapdragon-guide.md).** It covers the full setup and test one command at a time. The simple line workflow has now run in AutoCAD 2027 there. The screenshot confirms saved green review centerline `82` on `MARITIME_SUGGESTION`. The next milestone is the real cooling drawing through `MARITIMECAD`.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ The website does not need to be open. Both the plugin and browser app use the sa
 - Standard Python 3.14.x for the local service
 - The .NET 10 SDK only if you want to rebuild the plugin
 
-The DLL targets an x64 AutoCAD process. The actual AutoCAD installation on the Snapdragon laptop still needs a `NETLOAD` test. Building successfully on the Mac does not confirm that the plugin runs on that laptop.
+The DLL targets an x64 AutoCAD process. It has loaded and run the simple line workflow on the Snapdragon laptop. This confirms that path on the tested installation. The real solid workflow and Undo still need live checks.
 
 AutoCAD for Mac cannot load this managed .NET plugin. The Mac can run the Python service and browser tests. It can also compile the Windows DLL using the official Autodesk reference package.
 
@@ -60,9 +60,9 @@ Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/ap
 
 ## Use the included DLL
 
-The repo includes [Maritime.AutoCAD.dll](prebuilt/Maritime.AutoCAD.dll) in `autocad-plugin/prebuilt`. Use this for the first venue check. You do not need the .NET SDK to load an already built plugin. AutoCAD 2027 provides the runtime.
+The repo includes [Maritime.AutoCAD.dll](prebuilt/Maritime.AutoCAD.dll) in `autocad-plugin/prebuilt`. Use this for the venue tests. You do not need the .NET SDK to load an already built plugin. AutoCAD 2027 provides the runtime.
 
-[build-info.json](prebuilt/build-info.json) records the source hashes for that build. The package contains our DLL and does not bundle Autodesk runtime DLLs. AutoCAD execution remains unverified until the venue test.
+[build-info.json](prebuilt/build-info.json) records the source hashes for that build. The package contains our DLL and does not bundle Autodesk runtime DLLs. Those records describe the build. The later venue screenshot confirms the simple line workflow and review centerline save.
 
 ## Rebuild from source
 
@@ -151,7 +151,9 @@ This path uses selected obstacle extents as boxes. It checks the geometry you se
 
 `MARITIMEPREVIEW` shows selected line geometry in cyan. It is a quick way to check that the plugin loads and draws an overlay. It does not run a route search. Press Enter to clear the temporary graphics.
 
-## First venue checks
+## Venue checks
+
+The simple line workflow and Save are complete on the Snapdragon laptop. Undo and the real drawing path are the next checks. The list below is also useful when setting up another laptop.
 
 1. Confirm the DLL loads and all three commands are recognized.
 2. Confirm the local health address responds.
@@ -161,7 +163,7 @@ This path uses selected obstacle extents as boxes. It checks the geometry you se
 6. On a result reported as improved try keeping a review centerline. Check its layer and coordinates. Use Undo to remove it. The unchanged baseline will not offer Save.
 7. Record any command errors along with the AutoCAD version and selected object handle.
 
-### A small test that should improve
+### Repeat the small line test
 
 Open [line-test.dxf](examples/line-test.dxf) in AutoCAD. This is a clearly synthetic test drawing for checking the plugin controls. It contains one yellow route and one white equipment box.
 
@@ -173,9 +175,9 @@ Open [line-test.dxf](examples/line-test.dxf) in AutoCAD. This is a clearly synth
 
 The Python check for these exact inputs reduces the 8000 mm route to 4900 mm. Both routes pass the implemented checks. Verify that the green suggestion avoids the box. Choose Save to add the review centerline. Then use Undo and confirm that the original yellow route and white box remain.
 
-This example tests the line command and saved review geometry. Use the cooling drawing to test solid extraction through `MARITIMECAD`.
+The venue screenshot confirms that this line workflow ran and saved a review centerline. Undo has not been confirmed yet. Use the cooling drawing to test solid extraction through `MARITIMECAD`.
 
-The Python service passed its automated tests on the Mac. The real cooling snapshot also passed through the new inspection path over HTTP. The baseline stayed unchanged at 3679.25 mm. A controlled detour of 4179.25 mm was reduced to 3728.30 mm. That remains longer than the untouched baseline. Full AutoCAD execution and the review save still need verification on the event laptop.
+The Python service passed its automated tests on the Mac. The real cooling snapshot also passed through the new inspection path over HTTP. The baseline stayed unchanged at 3679.25 mm. A controlled detour of 4179.25 mm was reduced to 3728.30 mm. That remains longer than the untouched baseline. The simple line workflow and review save are now confirmed in AutoCAD on the event laptop. The cooling drawing test through `MARITIMECAD` remains unverified there.
 
 ## What still needs work
 

@@ -4,7 +4,7 @@ AutoCAD 2027 is already installed on the event laptop. The setup photo also show
 
 AutoCAD and the Python routing service run on this same laptop. The Mac and IQ9 board do not need to be connected.
 
-The code has passed its Mac checks and the DLL has compiled. The steps below are also our first live verification inside AutoCAD on this laptop.
+The code has passed its Mac checks and the DLL has compiled. The team has now run the small line test and saved its green suggestion inside AutoCAD on this laptop. If you have completed that test continue with section 6. The real drawing command and Undo still need separate live checks.
 
 ## 1. Open the project folder
 
