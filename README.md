@@ -77,7 +77,7 @@ The Windows packages were checked for ARM64 availability. The actual setup and f
 
 ## AutoCAD 2027 plug-in prototype
 
-A separate C# plug-in prototype is in [`autocad-plugin/`](autocad-plugin/README.md). Build it on the Windows laptop with the .NET 10 SDK and the AutoCAD 2027 managed assemblies, then load the generated DLL with `NETLOAD`. The `MARITIMEPREVIEW` command displays selected line-based route geometry as a temporary cyan overlay. This first preview does not call the Python router or change the drawing. See the plug-in README for build and load steps.
+A separate C# plug-in prototype is in [`autocad-plugin/`](autocad-plugin/README.md). Build it on the Windows laptop with the .NET 10 SDK and AutoCAD 2027 managed assemblies, then load the generated DLL with `NETLOAD`. `MARITIMEPREVIEW` shows the selected route as a temporary cyan overlay. `MARITIMEOPTIMIZE` sends the route and selected obstacle objects to the Python service running on the same laptop, then shows the suggested route as a temporary green overlay. Neither command changes the drawing. See the plug-in README for setup and limitations.
 
 ## Use a full drawing
 
