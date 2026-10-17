@@ -75,6 +75,10 @@ In **Check a route** choose **Open a layout file** and load [baseline.json](exam
 
 The Windows packages were checked for ARM64 availability. The actual setup and full workflow still need to be tested on the event laptop. Recreate the environment there instead of copying the Mac's `.venv`.
 
+## AutoCAD 2027 plug-in prototype
+
+A separate C# plug-in prototype is in [`autocad-plugin/`](autocad-plugin/README.md). Build it on the Windows laptop with the .NET 10 SDK and the AutoCAD 2027 managed assemblies, then load the generated DLL with `NETLOAD`. The `MARITIMEPREVIEW` command displays selected line-based route geometry as a temporary cyan overlay. This first preview does not call the Python router or change the drawing. See the plug-in README for build and load steps.
+
 ## Use a full drawing
 
 In **Explore real CAD** open a local DXF. Convert DWG files to DXF first. The browser app does not need AutoCAD or FreeCAD to run. The final result still needs comparison in the CAD software required for the challenge.

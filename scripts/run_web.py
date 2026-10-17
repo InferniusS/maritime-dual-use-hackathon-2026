@@ -239,19 +239,21 @@ def re_identifier(value):
     return len(value) == 32 and all(character in "0123456789abcdef" for character in value)
 
 
-def make_server(port=8767, output=None, cad_sample=None):
+def make_server(port=8767, output=None, cad_sample=None, host="127.0.0.1"):
     workspace = Workspace(output or ROOT / "data/generated/workspace", cad_sample)
-    return ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, workspace=workspace))
+    return ThreadingHTTPServer((host, port), partial(Handler, workspace=workspace))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="127.0.0.1", help="Interface to listen on (use 0.0.0.0 for LAN access)")
     parser.add_argument("--port", type=int, default=8767)
     parser.add_argument("--output", type=Path, default=ROOT / "data/generated/workspace")
     parser.add_argument("--cad-sample", type=Path, action="append", help="Local DXF drawing. Repeat to add more drawings.")
     args = parser.parse_args()
-    server = make_server(args.port, args.output, args.cad_sample)
-    print(f"Local workspace: http://127.0.0.1:{server.server_port}/", flush=True)
+    server = make_server(args.port, args.output, args.cad_sample, args.host)
+    display_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+    print(f"Workspace: http://{display_host}:{server.server_port}/", flush=True)
     print("Provisional rules. Processing stays on this computer. Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()

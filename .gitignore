@@ -33,6 +33,8 @@ pnpm-debug.log*
 build/
 dist/
 coverage/
+**/bin/
+**/obj/
 
 # macOS generated files.
 .DS_Store
