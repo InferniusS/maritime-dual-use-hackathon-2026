@@ -62,6 +62,34 @@ def test_success_logs_path_status_and_elapsed_without_payload(diagnostic_server,
     assert "1234.5678" not in output
 
 
+def test_real_runs_explicitly_close_and_repeated_client_requests_succeed(diagnostic_server):
+    server, finished = diagnostic_server
+    layout = json.loads((ROOT / "examples/scenarios/equipment-detour.json").read_text())
+    connection = HTTPConnection("127.0.0.1", server.server_port, timeout=10)
+    exports = set()
+    try:
+        for _ in range(3):
+            finished.clear()
+            connection.request("POST", "/api/run", json.dumps({"layout": layout}), {
+                "Content-Type": "application/json", "Connection": "keep-alive",
+            })
+            response = connection.getresponse()
+            assert response.status == 200
+            assert response.getheader("Connection") == "close"
+            assert response.will_close
+            body = response.read()
+            assert len(body) == int(response.getheader("Content-Length"))
+            result = json.loads(body)
+            assert result["result"]["status"] == "improved"
+            assert result["result"]["candidate"]["valid"]
+            assert result["result"]["candidate"]["length"] == 8000
+            exports.add(result["exports"]["json"])
+            assert finished.wait(5)
+        assert len(exports) == 3
+    finally:
+        connection.close()
+
+
 @pytest.mark.parametrize("error,status", [(ValueError("private coordinate 1234.5678"), 400),
                                         (ArithmeticError("private coordinate 1234.5678"), 500)])
 def test_processing_error_logs_type_and_stack_without_cad_values(diagnostic_server, monkeypatch, capsys, error, status):

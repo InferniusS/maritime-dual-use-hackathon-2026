@@ -227,7 +227,13 @@ If you downloaded a ZIP use a fresh extracted folder for the update and repeat t
 
 The venue run reached the real pipe calculation but reported a generic request error. The health page still responded. This does not establish why the calculation request failed.
 
-The latest diagnostic build names the failed request and shows its underlying error. Python now prints when each POST request starts and finishes. Routing rules are unchanged.
+The diagnostic build showed `ResponseEnded` for `/api/run`. The Python log showed successful preparation but no calculation request arriving. A controlled Mac test reproduced a similar connection failure when the server delayed closing a completed connection.
+
+The updated plugin now opens a fresh connection for each request. The server also explicitly says that each response closes its connection. No automatic calculation retry is added and routing rules are unchanged. Detailed AutoCAD errors and Python request logs remain available.
+
+The connection changes passed repeated .NET 10 requests against the delayed-close test server on the Mac. The exact AutoCAD workflow still needs a retry on the Snapdragon.
+
+For the quickest venue retry replace only `scripts/run_web.py` from the latest download. Stop Python with Ctrl+C before replacing it and restart it afterward. The explicit server close header also passed 30 requests with the older client in the controlled test. AutoCAD can stay open for this server-only update. The full update below also installs the plugin's fresh-connection handling.
 
 To update an existing working setup:
 

@@ -168,7 +168,11 @@ public sealed partial class PreviewCommand
         }
     }
 
-    private static HttpClient CreateClient() => new() { Timeout = TimeSpan.FromMinutes(5), BaseAddress = new Uri(ServiceUrl) };
+    private static HttpClient CreateClient() => new(new SocketsHttpHandler
+    {
+        // Do not reuse a socket while the single-request Python handler closes it.
+        PooledConnectionLifetime = TimeSpan.Zero
+    }) { Timeout = TimeSpan.FromMinutes(5), BaseAddress = new Uri(ServiceUrl) };
 
     private static void CheckService(HttpClient client)
     {
@@ -183,6 +187,8 @@ public sealed partial class PreviewCommand
     private static JsonObject SendServiceJson(HttpClient client, HttpMethod method, string path, object? payload = null)
     {
         using var request = new HttpRequestMessage(method, path);
+        // The local Python service handles one request per connection.
+        request.Headers.ConnectionClose = true;
         if (payload is not null)
             request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
         try

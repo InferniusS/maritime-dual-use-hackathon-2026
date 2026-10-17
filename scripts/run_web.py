@@ -57,9 +57,13 @@ class Handler(BaseHTTPRequestHandler):
         # second JSON response on the same socket.
         self._response_started = True
         self._response_status = status
+        # This HTTP/1.0 server handles one request per connection. Make that
+        # explicit so native clients do not pool a socket that is closing.
+        self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
