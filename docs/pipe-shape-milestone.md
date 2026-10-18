@@ -1,6 +1,8 @@
 # Pipe-shape milestone
 
-Updated October 17 2026.
+Historical milestone from October 17 2026.
+
+**Venue update later on October 17:** the team confirmed that the pipe-shape result displayed in AutoCAD on the Snapdragon and saved real review centerline `26B9`. That closes the real-drawing preview and Save checkpoint below. Its 50 mm settings remain historical. The current [standards iteration](standards-iteration.md) uses the V3 Challenge profile with 50.8 mm clearance and has a separate venue checklist.
 
 The AutoCAD connection is working. The next problem was the geometry used for collision checks. Treating a long bent component as one large box could block empty space around it. On the venue `DB1` test that stopped the search at the end of a preserved connection section.
 
@@ -34,9 +36,9 @@ The reported direction changes count line segments in a sampled centerline. They
 
 ## What has been verified on each computer
 
-On the Snapdragon the plugin loaded and saved a suggestion from the small line test. It also exported the real cooling drawing and received a normal calculation result from Python after the connection fix.
+On the Snapdragon the plugin loaded, ran the small line test, read the real cooling drawing and saved the real DB1 suggestion as review centerline `26B9`. The earlier connection failure was resolved.
 
-All 471 automated tests pass on the Mac. The updated Windows DLL builds with no warnings or errors. The new pipe-shape calculations above ran on the Mac. Their AutoCAD display and Save still need the venue check. Use the [Snapdragon update steps](snapdragon-guide.md#update-an-existing-working-setup) before rerunning `MARITIMECAD`. The service health response must include `pipe_envelopes`.
+At this milestone, all 471 automated tests passed on the Mac and the Windows DLL built without warnings or errors. The pipe-shape calculations above ran on the Mac and the DB1 display and Save were later verified at the venue. Current installation steps and health capabilities are in the [Snapdragon guide](snapdragon-guide.md#update-an-existing-working-setup). The test count and clearance values here describe this historical milestone.
 
 ## Repeat several selected routes
 
@@ -56,4 +58,4 @@ The latest replay results are in `data/generated/real-route-checks/run-20261018T
 
 We still change one selected route at a time. Branches and intermediate equipment connections are not fully modeled. The local box is not a verified ship boundary. The selected clearance and drain rules are not certified engineering standards. Commercial fittings and their complete volumes still need review.
 
-The output is a review centerline. It does not build a replacement pipe assembly. The next milestone is to inspect and save a real-drawing suggestion inside AutoCAD on the Snapdragon with the same settings.
+The output is a review centerline. It does not build a replacement pipe assembly. The real-drawing preview and Save milestone is now complete. The next work is tracked in the [standards and model context iteration](standards-iteration.md).

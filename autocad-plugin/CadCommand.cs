@@ -19,6 +19,33 @@ public sealed partial class PreviewCommand
     private const string SuggestionLayer = "MARITIME_SUGGESTION";
     private const int SnapshotLimitBytes = 48 * 1024 * 1024;
 
+    private static readonly Dictionary<string, JsonObject> DrawingContexts = new();
+
+    [CommandMethod("MARITIMECONTEXT", CommandFlags.Modal)]
+    public static void LoadDrawingContext()
+    {
+        var document = AcApplication.DocumentManager.MdiActiveDocument;
+        if (document is null) return;
+        var editor = document.Editor;
+        var fingerprint = document.Database.FingerprintGuid.ToString();
+        try
+        {
+            var action = AskKeyword(editor, "Drawing context", ["Load", "Clear", "Status"], "Load");
+            if (action == "Clear") { DrawingContexts.Remove(fingerprint); editor.WriteMessage("\nDrawing context cleared."); return; }
+            if (action == "Status") { editor.WriteMessage(DrawingContexts.ContainsKey(fingerprint) ? "\nA context file is loaded for this drawing session." : "\nNo context file is loaded. Missing context will be reported for review."); return; }
+            if (action != "Load") return;
+            var selected = editor.GetFileNameForOpen(new PromptOpenFileOptions("\nChoose the reviewed model context JSON file") { Filter = "JSON files (*.json)|*.json" });
+            if (selected.Status != PromptStatus.OK) return;
+            if (new FileInfo(selected.StringResult).Length > 16 * 1024 * 1024)
+                throw new InvalidOperationException("Context files must be at most 16 MB. Use a smaller local scene.");
+            var json = JsonNode.Parse(File.ReadAllText(selected.StringResult)) as JsonObject
+                ?? throw new InvalidOperationException("The context file must be a JSON object.");
+            DrawingContexts[fingerprint] = json;
+            editor.WriteMessage("\nContext loaded for this drawing session. Geometry and evidence will be validated when MARITIMECAD prepares the route. Confirm drawing alignment before running.");
+        }
+        catch (System.Exception exception) { editor.WriteMessage($"\nContext was not loaded: {exception.Message}"); }
+    }
+
     [CommandMethod("MARITIMECAD", CommandFlags.Modal)]
     public static void OptimizeDrawingPipe()
     {
@@ -57,9 +84,13 @@ public sealed partial class PreviewCommand
             var scale = UnitScale(units);
             var system = AskKeyword(editor, "Pipe system", ["Pressure", "Gravity"], "Pressure");
             if (system is null) return;
-            if (!AskNumber(editor, "Clearance in mm", 50, true, out var clearance) ||
+            var profile = AskKeyword(editor, "Rule profile", ["Challenge", "Prototype"], "Challenge");
+            if (profile is null) return;
+            if (!AskNumber(editor, "Clearance in mm", profile == "Challenge" ? 50.8 : 50, true, out var clearance) ||
                 !AskNumber(editor, "Local search padding in mm", 500, false, out var padding) ||
                 !AskNumber(editor, "Search grid step in mm", 250, false, out var grid)) return;
+            if (profile == "Challenge" && clearance < 50.8)
+                throw new InvalidOperationException("The challenge profile requires at least 50.8 mm shock clearance.");
             var reverse = false;
             var slope = 0.01;
             if (system == "Gravity")
@@ -109,8 +140,14 @@ public sealed partial class PreviewCommand
             {
                 ["cad_id"] = cadId, ["candidate_id"] = candidateId,
                 ["system_type"] = system == "Gravity" ? "gravity" : "pressurized",
-                ["clearance"] = clearance, ["padding"] = padding, ["reverse_flow"] = reverse
+                ["clearance"] = clearance, ["padding"] = padding, ["reverse_flow"] = reverse,
+                ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
             };
+            if (DrawingContexts.TryGetValue(metadata.fingerprint, out var contextFile))
+            {
+                request["model_context"] = (contextFile["model_context"] ?? contextFile).DeepClone();
+                if (contextFile["engineering"] is JsonObject engineering) request["engineering"] = engineering.DeepClone();
+            }
             var prepared = PostJson(client, "/api/prepare-cad-layout", request);
             var layout = RequiredLayout(prepared);
             VerifySnapshotContext(layout, metadata.fingerprint, snapshotHash);
@@ -180,6 +217,8 @@ public sealed partial class PreviewCommand
     private static void CheckService(HttpClient client)
     {
         var json = SendServiceJson(client, HttpMethod.Get, "/api/health");
+        if (json["capabilities"] is not JsonArray capabilities || !capabilities.Any(value => value?.GetValue<string>() == "challenge_rules_v3"))
+            throw new InvalidOperationException("Update and restart the Python service. This plugin needs challenge_rules_v3 support.");
         if (Text(json, "service") != "maritime-pipe-router" || Number(json, "api_version") != 1 || Text(json, "units") != "mm")
             throw new InvalidOperationException("The local service is not a compatible Maritime optimizer. Update and restart the Python service.");
     }
@@ -270,7 +309,19 @@ public sealed partial class PreviewCommand
         if (baseline.Count != expected.Count || baseline.Where((point, index) => point.DistanceTo(expected[index]) > 0.0001).Any())
             throw new InvalidOperationException("The returned baseline does not match the request.");
         editor.WriteMessage($"\nOriginal length: {Number(originalRecord, "length"):0.###} mm. " +
-            $"Original passes implemented checks: {originalRecord["valid"]?.GetValue<bool>() == true}.");
+            $"Original passes geometric checks: {originalRecord["valid"]?.GetValue<bool>() == true}. Review rule findings separately.");
+        if (result["challenge_review"] is JsonObject review)
+        {
+            foreach (var key in new[] { "original", "candidate" })
+            {
+                if (review[key] is not JsonObject assessment) continue;
+                var counts = assessment["counts"];
+                editor.WriteMessage($"\nV3 {key}: {counts?["pass"]} pass, {counts?["fail"]} fail, {counts?["needs_review"]} need review. Full compliance is not verified.");
+                if (assessment["findings"] is JsonArray findings)
+                    foreach (var finding in findings.Where(f => f?["status"]?.GetValue<string>() == "fail").Take(8))
+                        editor.WriteMessage($"\n{finding?["id"]}: {finding?["message"]}");
+            }
+        }
         WriteMessages(editor, result["limitations"], "Limit", 6);
         if (reply["exports"] is JsonObject exports)
         {
@@ -301,7 +352,7 @@ public sealed partial class PreviewCommand
         var suggestedLength = Number(candidate, "length");
         if (status == "unchanged") editor.WriteMessage("\nThe original route was retained. This search found no better checked route.");
         else editor.WriteMessage($"\nSuggested length: {suggestedLength:0.###} mm. Length change: {suggestedLength - originalLength:+0.###;-0.###;0} mm.");
-        editor.WriteMessage("\nThis is a checked centerline suggestion under the selected prototype rules. It is not a fitted pipe model or a compliance certificate.");
+        editor.WriteMessage("\nThis is a checked centerline suggestion under the selected geometry rules. Review the V3 findings and missing evidence in the report. It is not a fitted pipe model or a compliance certificate.");
         var record = new JsonObject
         {
             ["drawing_fingerprint"] = fingerprint,

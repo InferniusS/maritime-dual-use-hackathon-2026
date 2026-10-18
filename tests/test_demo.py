@@ -108,7 +108,7 @@ def test_cad_derived_report_preserves_provenance_in_html_json_and_dxf(tmp_path):
     assert "CAD-DERIVED REVIEW" in page
     assert "SYNTHETIC TEST" not in page
     assert "geometry is invented" not in page
-    assert "Pass implemented checks" in page
+    assert "Pass geometric checks" in page
     assert "does not certify compliance" in page
     assert "extraction method and completeness still need review" in page
     document = ezdxf.readfile(folder / "route-centerlines.dxf")

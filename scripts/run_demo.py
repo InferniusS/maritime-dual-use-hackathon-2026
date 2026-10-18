@@ -22,6 +22,7 @@ from ezdxf import units
 import plotly.graph_objects as go
 
 from pipe_router.workflow import run_workflow
+from pipe_router.review_export import challenge_panel, write_review_xlsx
 
 
 def display_layout(layout, result):
@@ -317,12 +318,12 @@ def write_html(layout, result, elapsed, destination):
         if route is None:
             return "No accepted route"
         if key == "valid":
-            return "Pass implemented checks" if route[key] else "Needs attention"
+            return "Pass geometric checks" if route[key] else "Needs attention"
         return f"{route[key]:,.0f}" + (" mm" if key == "length" else "")
     direction_label = "Sampled direction changes (not fittings)" if not synthetic else "Direction changes"
     rows = "".join(
         f"<tr><th>{label}</th><td>{metric(original, key)}</td><td>{metric(candidate, key)}</td></tr>"
-        for label, key in (("Route length", "length"), (direction_label, "bends"), ("Implemented checks", "valid"))
+        for label, key in (("Route length", "length"), (direction_label, "bends"), ("Geometric checks", "valid"))
     )
     points = "" if candidate is None else "".join(
         "<tr><td>" + str(i + 1) + "</td>" + "".join(f"<td>{value:g}</td>" for value in point) + "</tr>"
@@ -332,7 +333,7 @@ def write_html(layout, result, elapsed, destination):
     for key, label in (("original", "Original"), ("candidate", "Suggested")):
         if result.get(key):
             issue_items.extend(f"<li>{label}: {escape(diagnostic_text(issue))}</li>" for issue in result[key]["issues"])
-    issues = "<ul>" + "".join(issue_items) + "</ul>" if issue_items else "<p>No issues found by the implemented checks.</p>"
+    issues = "<ul>" + "".join(issue_items) + "</ul>" if issue_items else "<p>No geometric issues found by the implemented checks. Review the rule findings separately.</p>"
     diagnostics = ""
     if result.get("diagnostics"):
         diagnostics = '<section class="panel"><h2>What stopped the search</h2><ul>' + "".join(
@@ -380,7 +381,11 @@ def write_html(layout, result, elapsed, destination):
     coverage_text += " " + geometry_coverage(layout)
     if layout.get("protected_endpoints"):
         coverage_text += " Yellow end sections must remain unchanged. Contact with their listed connection objects is allowed only along those fixed sections. The movable route still checks every obstacle. Connection identities remain assumptions."
-    if gravity:
+    challenge = result.get("rule_profile") == "fmg-v3"
+    rule_text = "Selected checks use the supplied V3 brief; missing evidence remains needs_review." if challenge else "The selected rule values are provisional."
+    if gravity and challenge:
+        coverage_text += " Drain checks use 1:25 fore-aft and 1:100 athwartship minimum fall when ship axes and flow are confirmed. Missing axes, exact pitch and unsupported directions remain review items."
+    elif gravity:
         coverage_text += f" Each segment is checked for downhill flow and the selected minimum slope of {layout['rules']['min_slope']:g} in the start-to-end direction. Positive Z is assumed to point upward."
     else:
         coverage_text += " New pressure route suggestions use axis-aligned segments."
@@ -418,12 +423,13 @@ a {{ color: #55dcc8 }}
 </style></head><body><main>
 <span class="tag">TRACK 2 / {provenance_tag}</span>
 <h1>{headline}</h1>
-<p>{escape(layout.get('name', 'Pipe layout'))}. {provenance_text} The selected rule values are provisional. This report does not certify compliance with engineering standards.</p>
+<p>{escape(layout.get('name', 'Pipe layout'))}. {provenance_text} {rule_text} This report does not certify compliance with engineering standards.</p>
 <p class="muted">{system_text}. Fixed connections. Same {layout['pipe']['diameter']:g} mm outer diameter. Selected clearance {layout['rules']['clearance']:g} mm. Declared input units {source_units}. This report uses millimeters.</p>
 {benchmark_panel}
 <div class="panel"><table><thead><tr><th>Measure</th><th>Original</th><th>Suggested</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="muted">{coverage_text}</p></div>
 {diagnostics}
+{challenge_panel(result)}
 <div class="panel plot">{plot}</div>
 <p class="muted">Drag to rotate. Click a legend item to hide it. Lines show pipe centers. The collision check also accounts for pipe thickness.</p>
 <div class="columns"><section class="panel"><h2>Check results</h2>{issues}
@@ -434,7 +440,7 @@ a {{ color: #55dcc8 }}
 <table><thead><tr><th>Point</th><th>x</th><th>y</th><th>z</th></tr></thead><tbody>{points}</tbody></table></section></div>
 <section class="panel"><h2>Assumptions used in this review</h2><ul>{assumption_list}</ul></section>
 <section class="panel"><h2>What still needs work</h2><ul>{limitation_list}</ul>
-<p>Review the source geometry and unit assumptions before interpreting real dimensions. The selected clearance and slope values remain prototype rules.</p></section>
+<p>Review the source geometry and unit assumptions before interpreting real dimensions. {rule_text}</p></section>
 <p><a href="result.json">Full result and inputs</a> &nbsp; <a href="route-centerlines.dxf">Centerlines for CAD review</a></p>
 <p class="muted">The DXF contains {export_text}. It does not modify the source ship drawing or contain finished pipe solids and fittings. The report works offline.</p>
 </main></body></html>"""
@@ -467,6 +473,7 @@ def main():
                               "python": platform.python_version()}}
         targets[0].write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
         write_dxf(normalized, result, targets[2])
+        write_review_xlsx(normalized, result, output / "route-review.xlsx")
         write_html(normalized, result, elapsed, targets[1])
     except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
         parser.exit(2, f"Cannot generate demo: {exc}\n")

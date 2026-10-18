@@ -4,7 +4,7 @@ This plugin brings the existing Python pipe router into AutoCAD. AutoCAD handles
 
 The website does not need to be open. Both the plugin and browser app use the same calculation code.
 
-**For the event laptop follow the [Snapdragon guide](../docs/snapdragon-guide.md).** It covers the full setup and test one command at a time. The simple line workflow has now run in AutoCAD 2027 there. The screenshot confirms saved green review centerline `82` on `MARITIME_SUGGESTION`. The next milestone is the real cooling drawing through `MARITIMECAD`.
+**For the event laptop follow the [Snapdragon guide](../docs/snapdragon-guide.md).** It covers the full setup and test one command at a time. Both the simple line test and the real cooling drawing workflow have run in AutoCAD 2027 there. The team saved real review centerline `26B9` on `MARITIME_SUGGESTION`. The new [V3 standards and model context update](../docs/standards-iteration.md) still needs its live venue check.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ The website does not need to be open. Both the plugin and browser app use the sa
 - Standard Python 3.14.x for the local service
 - The .NET 10 SDK only if you want to rebuild the plugin
 
-The DLL targets an x64 AutoCAD process. It has loaded and run the simple line workflow on the Snapdragon laptop. This confirms that path on the tested installation. The real solid workflow and Undo still need live checks.
+The DLL targets an x64 AutoCAD process. It has loaded and saved results from both the simple line and real solid workflows on the Snapdragon laptop. This confirms those paths on the tested installation. The new Challenge profile and context workflow still need live checks. Undo also needs an explicit venue check.
 
 AutoCAD for Mac cannot load this managed .NET plugin. The Mac can run the Python service and browser tests. It can also compile the Windows DLL using the official Autodesk reference package.
 
@@ -56,13 +56,13 @@ Keep this window running. The plugin connects to `http://127.0.0.1:8767` on the 
 
 These commands do not require `Activate.ps1` or a PowerShell execution policy change. You can leave the blocked setup script alone.
 
-Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Then load the plugin below.
+Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Its capabilities must include `challenge_rules_v3`, `model_context` and `review_excel`. If they are missing, update the Python files and restart the service before loading the current DLL.
 
 ## Use the included DLL
 
 The repo includes [Maritime.AutoCAD.dll](prebuilt/Maritime.AutoCAD.dll) in `autocad-plugin/prebuilt`. Use this for the venue tests. You do not need the .NET SDK to load an already built plugin. AutoCAD 2027 provides the runtime.
 
-[build-info.json](prebuilt/build-info.json) records the source hashes for that build. The package contains our DLL and does not bundle Autodesk runtime DLLs. Those records describe the build. The later venue screenshot confirms the simple line workflow and review centerline save.
+[build-info.json](prebuilt/build-info.json) records the source hashes for that build. The package contains our DLL and does not bundle Autodesk runtime DLLs. Those records describe the build. The venue screenshots confirm the earlier simple line and real drawing review saves. A successful build alone does not establish that new commands have run on the laptop.
 
 ## Rebuild from source
 
@@ -105,7 +105,8 @@ If AutoCAD blocks the DLL use a trusted project folder or add that specific fold
 
 | Command | What it is for |
 | --- | --- |
-| `MARITIMECAD` | Read a pipe solid or block from the current drawing and test a detected route |
+| `MARITIMECAD` | Read a pipe solid or block and check a detected route with Challenge or Prototype rules |
+| `MARITIMECONTEXT` | Load, inspect the loaded status or clear reviewed context for the active drawing session |
 | `MARITIMEOPTIMIZE` | Test a route made from selected straight lines or polylines with selected obstacle objects |
 | `MARITIMEPREVIEW` | Check that selected line geometry can be shown as a temporary cyan overlay |
 
@@ -121,23 +122,34 @@ The command asks for these settings before you choose a route:
 | --- | --- |
 | Drawing units | Choose millimeters or meters or inches |
 | System | Pressure |
-| Clearance | 50 mm |
+| Rule profile | Challenge |
+| Clearance | 50.8 mm for Challenge, 50 mm for Prototype |
 | Local search padding | 500 mm |
 | Search grid step | 250 mm |
 | Gravity flow direction | Keep the inferred start and end |
 | Minimum gravity slope | 0.01 fall per horizontal distance |
 
-These values are prototype assumptions. They are editable in the command. The gravity options appear only when you choose Gravity.
+Challenge uses the V3 brief and rejects clearance below 50.8 mm. Prototype retains the earlier assumptions for replay. Units, padding and grid remain explicit choices. The gravity options appear only for Gravity. The generic slope prompt is not a substitute for declared ship axes and flow direction. Challenge directional checks need those declarations in reviewed context and engineering evidence. Missing information appears as `needs_review`.
 
-After you choose a candidate the command shows its original route in cyan. Check the endpoints and included components. The service prepares nearby obstacle boxes and keeps the route endpoints fixed.
+After you choose a candidate the command shows its original route in cyan. Check the endpoints and included components. The service prepares nearby supported pipe envelopes and fallback boxes. It keeps the route endpoints fixed. Loaded context may add surrounding geometry, allowed spaces and protected exclusion volumes.
 
-If obstacle boxes touch the ends the command lists those contacts. It asks whether to treat all listed contacts as intended fixed connections. The default is No. Choosing Yes preserves bounded original end sections. The initial limit is 250 mm and the maximum is 1000 mm. This assumption does not allow the movable middle to pass through an obstacle.
+If obstacle envelopes touch the ends the command lists those contacts. It asks whether to treat all listed contacts as intended fixed connections. The default is No. Choosing Yes preserves bounded original end sections. The initial limit is 250 mm and the maximum is 1000 mm. This assumption does not allow the movable middle to pass through an obstacle.
 
-The final preview shows the original route in cyan and the suggestion in green. The command prints lengths and check findings with links to local result files. If a route improves under the implemented checks you can choose **Save**. The default is **Discard**. Unchanged results and failed searches do not offer a replacement to save.
+The final preview shows the original route in cyan and the suggestion in green. The command prints lengths, geometric check results and separate V3 rule findings with local links to JSON, DXF, HTML and Excel review files. Green identifies a geometrically checked suggestion. It does not certify complete standards compliance. If a route improves under the implemented checks you can choose **Save**. The default is **Discard**. Unchanged results and failed searches do not offer a replacement to save.
 
 Save adds a 3D review polyline on the `MARITIME_SUGGESTION` layer with source information. It keeps the original pipe solids and can be undone. A review centerline is a proposed path for a designer to inspect. It is not a new pipe assembly with validated fittings.
 
 The command handles one selected route at a time. It does not optimize the complete ship drawing in one step. Select objects directly in model space. For external references open the referenced drawing itself. Snapshot uploads are limited to 48 MB. An unsupported object or an overly broad block selection may not produce a usable candidate.
+
+### Drawing context
+
+Run `MARITIMECONTEXT` with the intended drawing active. Choose `Load` and select a reviewed JSON file. It accepts a raw context object or a wrapper with `model_context` and optional `engineering`. The file must be at most 16 MB. Use `Status` to check whether context is loaded or `Clear` to remove it.
+
+Context is tied to the active drawing's fingerprint for the current AutoCAD session. Reload it after restarting AutoCAD. The service validates its geometry and evidence when `MARITIMECAD` prepares a route. Loading a file alone does not establish coverage or alignment.
+
+The [context preparation guide](../docs/standards-iteration.md#add-reviewed-surroundings) explains `examples/model-context-template.json` and `scripts/build_model_context.py`. The builder reads local aligned DXF exports without changing them. It does not align drawings, infer allowed compartments or approve coverage.
+
+Manufacturing and access data must be explicit and tied to the original route. Changing the route does not automatically update that evidence. The Excel review contains coordinates, findings and declared pieces. It is not a finished manufactured parts list.
 
 ### Simple line workflow
 
@@ -153,15 +165,16 @@ This path uses selected obstacle extents as boxes. It checks the geometry you se
 
 ## Venue checks
 
-The simple line workflow and Save are complete on the Snapdragon laptop. Undo and the real drawing path are the next checks. The list below is also useful when setting up another laptop.
+The simple line and real drawing Save paths are complete on the Snapdragon. The new profile, context and report flow remain the next live checks. The list below also applies when setting up another laptop.
 
-1. Confirm the DLL loads and all three commands are recognized.
-2. Confirm the local health address responds.
-3. Try `MARITIMECAD` on a supported pipe object in the cooling drawing. Source handle `DB2` was used in the Mac snapshot test and matched the saved joined route.
-4. Check that the selected route appears at the correct position and scale. Millimeters are the current prototype assumption.
-5. To reproduce our saved baseline choose the joined route containing DB2 and E6D and E16. Use millimeters with Pressure and the default 50 mm clearance. Our local test treats the four listed start contacts as fixed connections with a 250 mm limit. Review those contacts before applying the same assumption. The expected saved example result is unchanged at about 3679.25 mm. A finished route does not need to become shorter.
-6. On a result reported as improved try keeping a review centerline. Check its layer and coordinates. Use Undo to remove it. The unchanged baseline will not offer Save.
-7. Record any command errors along with the AutoCAD version and selected object handle.
+1. Update the Python code, examples and DLL together. Close AutoCAD before replacing a loaded DLL.
+2. Run `scripts/check_challenge.py` from the repository with the project Python. Expect eight `PASS` lines.
+3. Start the service and confirm the health capabilities listed above. Load the fresh DLL with `NETLOAD` and confirm all four commands are recognized.
+4. Run `MARITIMECAD` on a supported pipe object in a cooling drawing copy. Choose Millimetres, Pressure, Challenge, 50.8 mm clearance, 500 mm padding and 250 mm grid. Confirm the selected route's position and scale.
+5. For DB1, the latest Mac replay returns a 2558 mm suggestion for the 2413.467 mm original. The joined DB2/E6D/E16 route remains unchanged at about 3679.248 mm. Review endpoint contacts before accepting bounded fixed sections of at most 250 mm. Missing engineering information must remain visible in the report.
+6. Load prepared reviewed context with `MARITIMECONTEXT`. Rerun the route and inspect the added scene coverage and rule findings. Do not claim complete ship coverage from a cooling-only snapshot.
+7. On an improved result, Save the separate review centerline. Check its layer and coordinates, then use Undo and confirm the original remains. The unchanged baseline will not offer Save.
+8. Open the HTML and Excel review. Record any error with the AutoCAD version and selected handle.
 
 ### Repeat the small line test
 
@@ -175,15 +188,15 @@ Open [line-test.dxf](examples/line-test.dxf) in AutoCAD. This is a clearly synth
 
 The Python check for these exact inputs reduces the 8000 mm route to 4900 mm. Both routes pass the implemented checks. Verify that the green suggestion avoids the box. Choose Save to add the review centerline. Then use Undo and confirm that the original yellow route and white box remain.
 
-The venue screenshot confirms that this line workflow ran and saved a review centerline. Undo has not been confirmed yet. Use the cooling drawing to test solid extraction through `MARITIMECAD`.
+The venue screenshots confirm that this line workflow and the real cooling workflow both saved review centerlines. Undo has not been explicitly confirmed yet.
 
-The Python service passed its automated tests on the Mac. The real cooling snapshot also passed through the new inspection path over HTTP. The baseline stayed unchanged at 3679.25 mm. A controlled detour of 4179.25 mm was reduced to 3728.30 mm. That remains longer than the untouched baseline. The simple line workflow and review save are now confirmed in AutoCAD on the event laptop. The cooling drawing test through `MARITIMECAD` remains unverified there.
+The Mac suite passes 610 tests. The updated DLL builds with zero warnings and zero errors. Eight public challenge cases and the 50.8 mm real drawing replays have also completed. These checks support the implementation but do not replace live verification of the new commands in AutoCAD.
 
 ## What still needs work
 
-We reuse the existing search rather than training a new model. Adding the plugin does not add knowledge of pipe standards or equipment requirements.
+We reuse the existing search rather than training a new model. The V3 assessment uses encoded requirements and explicit model evidence. It does not infer all equipment requirements from geometry.
 
-The importer supports some surface types. Obstacles are approximate boxes. The local routing boundary and engineering values are provisional assumptions. Branches and required equipment need more work before whole system optimization. Saved suggestions contain centerlines instead of complete fittings and pipe solids.
+The importer supports some surface types. Supported components use conservative pipe envelopes and other objects retain fallback boxes. Without reviewed context, the local routing box is not a verified ship boundary. Branches, actual component identities, physical fitting shapes and installation planning need more work. Saved suggestions contain centerlines instead of complete fittings and pipe solids.
 
 The browser version and the [saved example](../examples/real-cad-demo/report.html) remain available if the AutoCAD integration needs debugging. See [the team handoff](../docs/team-handoff.md) for the full next steps.
 

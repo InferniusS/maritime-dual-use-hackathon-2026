@@ -19,6 +19,26 @@ MAX_GRAVITY_AXIS_COORDINATES = 64
 MAX_ENDPOINT_STUB_MM = 1000.0
 
 
+def _with_rule_profile(layout: dict) -> dict:
+    """Apply the same explicit profile defaults to routing and validation."""
+    core._mapping(layout, "layout")
+    supplied = deepcopy(layout)
+    profile = supplied.get("rule_profile", "prototype-unverified")
+    if profile not in ("prototype-unverified", "fmg-v3"):
+        raise ValueError("Unknown rule_profile. Choose prototype-unverified or fmg-v3")
+    if profile == "fmg-v3":
+        rules = core._mapping(supplied.setdefault("rules", {}), "rules")
+        units = supplied.get("units", "mm")
+        if not isinstance(units, str) or units not in UNIT_SCALE:
+            raise ValueError("units must be mm, m, or in")
+        scale = UNIT_SCALE[units]
+        if "clearance" not in rules:
+            rules["clearance"] = 50.8 / scale
+        if core._number(rules["clearance"], "clearance") * scale < 50.8 - core.EPSILON:
+            raise ValueError("The V3 challenge profile requires at least 50.8 mm shock clearance")
+    return supplied
+
+
 def normalize_layout(layout: dict) -> dict:
     """Return a separate millimeter copy, scaling every supported length field.
 
@@ -112,6 +132,8 @@ def normalize_layout(layout: dict) -> dict:
         identifiers = record.get("obstacle_ids")
         if not isinstance(identifiers, list) or not identifiers or not all(isinstance(item, str) and item in obstacle_ids for item in identifiers):
             raise ValueError("Protected endpoint obstacle_ids must name existing obstacles")
+        if any(not _connection_obstacle_allowed(result, identifier) for identifier in identifiers):
+            raise ValueError("Protected access or structure obstacles cannot be treated as pipe connections")
         expected = pipe["original_route"][:len(raw_stub)] if endpoint == "start" else pipe["original_route"][-len(raw_stub):]
         if record["points"] != expected:
             raise ValueError("Protected endpoint points must exactly preserve the original route prefix or suffix")
@@ -132,6 +154,14 @@ def normalize_layout(layout: dict) -> dict:
     # synthetic-only contract. Public metadata never uses this private adapter.
     core._prepare_layout(_core_adapter(result))
     return result
+
+
+def _connection_obstacle_allowed(layout, identifier):
+    if not identifier.startswith("context:"):
+        return True
+    sources = layout.get("model_context", {}).get("obstacle_sources", [])
+    source = next((item for item in sources if item.get("id") == identifier), {})
+    return not identifier.startswith("context:keepout:") and source.get("category") in ("piping", "equipment")
 
 
 def _core_adapter(layout: dict) -> dict:
@@ -197,6 +227,8 @@ def with_endpoint_connections(layout: dict, endpoint_connections: dict | None, m
     for endpoint, identifiers in endpoint_connections.items():
         if not isinstance(identifiers, list) or not all(isinstance(item, str) and item in box_lookup for item in identifiers):
             raise ValueError("Endpoint connections must name existing obstacle IDs")
+        if any(not _connection_obstacle_allowed(result, identifier) for identifier in identifiers):
+            raise ValueError("Protected access or structure obstacles cannot be treated as pipe connections")
         if not identifiers:
             continue
         directed = original if endpoint == "start" else list(reversed(original))
@@ -306,6 +338,17 @@ def _validate_normalized(layout: dict, raw_points: Any, *, allow_pressure_polyli
                 if fall + core.EPSILON < layout["rules"]["min_slope"] * horizontal:
                     result["issues"].append({"code": "insufficient_slope", "segment": segment, "message": "This segment does not meet the provisional minimum fall per horizontal distance", "actual_slope": slope})
         result["minimum_segment_slope"] = min(slopes) if slopes else None
+    if layout.get("model_context"):
+        from .model_context import validate_allowed_spaces
+        result["issues"].extend({"code": item.get("rule_id", "allowed_spaces"), **item}
+                                for item in validate_allowed_spaces(layout, raw_points) if item["status"] == "fail")
+    if layout.get("rule_profile") == "fmg-v3" and layout["system_type"] == "gravity":
+        from .challenge_rules import directional_minimum_fall
+        for index, (start, end) in enumerate(zip(points, points[1:])):
+            required = directional_minimum_fall(layout, start, end)
+            if required is not None and start[2] - end[2] + core.EPSILON < required:
+                result["issues"].append({"code": "challenge_drain_slope", "segment": index,
+                    "message": "Drain segment does not meet the V3 slope in this ship direction", "required_fall_mm": required})
     result["bends"] = sum(angle > 1e-7 for angle in _corner_angles(points))
     result["issues"].extend(_fitting_issues(points, layout["rules"].get("bend_radius")))
     result["valid"] = not result["issues"]
@@ -314,7 +357,12 @@ def _validate_normalized(layout: dict, raw_points: Any, *, allow_pressure_polyli
 
 def validate_layout_route(layout: dict, points: list) -> dict:
     """Validate points in the layout's input units. Report lengths in mm."""
-    normalized = normalize_layout(layout)
+    layout = _with_rule_profile(layout)
+    if layout.get("model_context"):
+        from .model_context import apply_model_context
+        normalized = apply_model_context(layout, layout["model_context"])
+    else:
+        normalized = normalize_layout(layout)
     if not isinstance(points, (list, tuple)) or not 2 <= len(points) <= core.MAX_ROUTE_POINTS:
         return _validate_normalized(normalized, points)
     try:
@@ -390,6 +438,14 @@ def _gravity_search(layout: dict, *, objective_penalty: float | None = None) -> 
             continue
         seen.add(key)
         horizontal = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
+        required_falls = None
+        if layout.get("rule_profile") == "fmg-v3":
+            from .challenge_rules import directional_minimum_fall
+            values = [directional_minimum_fall(layout, [a[0], a[1], 0], [b[0], b[1], 0]) for a, b in zip(path, path[1:])]
+            if values and all(v is not None for v in values):
+                required_falls = values
+                if sum(values) > fall + core.EPSILON:
+                    continue
         if fall + core.EPSILON < horizontal * layout["rules"]["min_slope"]:
             continue
         if horizontal == 0:
@@ -397,9 +453,16 @@ def _gravity_search(layout: dict, *, objective_penalty: float | None = None) -> 
         else:
             travelled = 0.0
             points = [list(start)]
-            for a, b in zip(path, path[1:]):
-                travelled += math.dist(a, b)
-                points.append([b[0], b[1], start[2] - fall * travelled / horizontal])
+            accumulated_fall = 0.0
+            for index, (a, b) in enumerate(zip(path, path[1:])):
+                distance = math.dist(a, b)
+                travelled += distance
+                if required_falls is not None:
+                    accumulated_fall += required_falls[index] + max(0, fall - sum(required_falls)) * distance / horizontal
+                    z = start[2] - accumulated_fall
+                else:
+                    z = start[2] - fall * travelled / horizontal
+                points.append([b[0], b[1], z])
             points[-1] = list(end)
         search["evaluated_candidates"] += 1
         record = _validate_normalized(layout, points)
@@ -423,11 +486,16 @@ def _run_without_protected_search(layout: dict) -> dict:
         original["route_representation"] = normalized["pipe"].get("route_representation", "cad_centerline_polyline")
         original["bend_count_kind"] = "polyline_direction_changes_not_fitting_count"
     if normalized["system_type"] == "pressurized":
-        if cad_derived:
-            search_layout = {**normalized, "rules": {**normalized["rules"], "bend_penalty": 0.0}}
-            route, search = core._search(core._prepare_layout(_core_adapter(search_layout)))
+        if cad_derived or normalized.get("model_context"):
+            search_layout = {**normalized, "rules": {**normalized["rules"], "bend_penalty": 0.0 if cad_derived else normalized["rules"]["bend_penalty"]}}
+            from .model_context import prepare_allowed_space_predicate
+            route, search = core._search(core._prepare_layout(_core_adapter(search_layout)),
+                                        segment_filter=prepare_allowed_space_predicate(normalized))
             points = [list(point) for point in route] if route is not None else None
-            method = "CPU A* on a finite orthogonal 3D grid. CAD-derived route comparisons use length only because sampled direction changes are not reliable fitting counts."
+            method = "CPU A* on a finite orthogonal 3D grid. " + (
+                "CAD-derived route comparisons use length only because sampled direction changes are not reliable fitting counts."
+                if cad_derived else "The synthetic test uses length and the selected bend penalty, with declared allowed spaces enforced."
+            )
         else:
             solved = core.solve_layout(_core_adapter(normalized))
             points = solved["candidate"]["points"] if solved["candidate"] else None
@@ -557,7 +625,7 @@ def _explain_obstacles(layout: dict, result: dict) -> dict:
     return result
 
 
-def run_workflow(layout: dict) -> dict:
+def _run_geometry_workflow(layout: dict) -> dict:
     """Run the route search while preserving any explicit endpoint stubs."""
     normalized = normalize_layout(layout)
     protected = normalized.get("protected_endpoints", [])
@@ -572,6 +640,13 @@ def run_workflow(layout: dict) -> dict:
     inner = deepcopy(normalized)
     inner.pop("protected_endpoints", None)
     inner["pipe"].update({"start": middle[0], "end": middle[-1], "original_route": middle})
+    if inner.get("model_context", {}).get("required_space_ids"):
+        from .model_context import validate_allowed_spaces
+        visited = set()
+        for record in protected:
+            visited.update(f["space_id"] for f in validate_allowed_spaces(normalized, record["points"])
+                           if f["rule_id"] == "required_space" and f["status"] == "pass")
+        inner["model_context"]["required_space_ids"] = [identity for identity in inner["model_context"]["required_space_ids"] if identity not in visited]
     result = _run_without_protected_search(inner)
     cad_derived = normalized["provenance"] == "cad-derived"
     original = {"points": original_points, **_validate_normalized(normalized, original_points, allow_pressure_polyline=cad_derived)}
@@ -606,3 +681,61 @@ def run_workflow(layout: dict) -> dict:
     result["assumptions"].append("Only explicitly selected connector contacts on exact original endpoint stubs are exempted. The movable middle has no collision exemptions.")
     result["limitations"].append("Endpoint connector contact assumptions are user selections for this prototype. They do not verify equipment ports, fitting availability, or actual connectivity.")
     return _explain_obstacles(normalized, result)
+
+
+def run_workflow(layout: dict) -> dict:
+    """Route geometry and attach a separate, evidence-aware challenge assessment."""
+    supplied = _with_rule_profile(layout)
+    profile = supplied.get("rule_profile", "prototype-unverified")
+    if supplied.get("model_context"):
+        from .model_context import apply_model_context
+        supplied = apply_model_context(supplied, supplied["model_context"])
+    if profile == "fmg-v3":
+        from .challenge_rules import assess_layout, directional_requirements
+        baseline_layout = normalize_layout(supplied)
+        # Validate engineering declarations before spending time on the search.
+        assess_layout(baseline_layout)
+        direction = directional_requirements(baseline_layout)
+        if supplied["system_type"] == "gravity" and direction.get("flow_direction") == "end_to_start":
+            raise ValueError("For routing, reverse the route points so flow is start_to_end. Rebind any engineering measurements to that order.")
+    result = _run_geometry_workflow(supplied)
+    result["input_units"] = layout.get("units", "mm")
+    if profile != "fmg-v3":
+        return result
+    from .challenge_rules import assess_layout
+    normalized = result["normalized_layout"]
+    baseline = assess_layout(normalized, result["original"]["points"])
+    candidate = assess_layout(normalized, result["candidate"]["points"]) if result.get("candidate") else None
+    for assessment, record in ((baseline, result["original"]), (candidate, result.get("candidate"))):
+        if assessment is None:
+            continue
+        context = normalized.get("model_context", {})
+        from .model_context import validate_allowed_spaces
+        checks = context.get("findings", []) + validate_allowed_spaces(normalized, record["points"])
+        for item in checks:
+            assessment["findings"].append({"id": "context_" + item["rule_id"], "status": item["status"], "severity": "error",
+                "source": {"document": "Pipe Layout Optimization V3", "page": 2}, "message": item["message"],
+                "measured": item, "required": "Declared model context", "source_refs": []})
+        assessment["counts"] = {status: sum(f["status"] == status for f in assessment["findings"]) for status in ("pass", "fail", "needs_review", "not_applicable")}
+        assessment["hard_failures"] = [f["id"] for f in assessment["findings"] if f["status"] == "fail" and f["severity"] == "error"]
+        assessment["complete"] = False
+    result["rule_profile"] = "fmg-v3"
+    result["challenge_review"] = {"profile": "fmg-v3", "original": baseline, "candidate": candidate,
+        "complete_compliance_verified": False,
+        "scope": "Checks use supplied geometry and declared engineering measurements. Unavailable evidence remains needs_review."}
+    # Known mandatory failures cannot be presented as accepted replacements.
+    if candidate and any(f["status"] == "fail" and f["severity"] == "error" for f in candidate["findings"]):
+        result["challenge_review"]["rejected_candidate"] = deepcopy(candidate)
+        result["candidate"] = None
+        result["status"] = "no_route"
+        result["search"]["reason"] = "The geometric candidate failed a mandatory V3 check. See the challenge findings. No replacement was accepted."
+    result["assumptions"] = [a for a in result["assumptions"] if a != "Selected rules are an unverified prototype profile, not an official engineering standard."]
+    result["assumptions"].append("V3 values come from the supplied challenge brief. Evidence coverage and engineering suitability are not automatically verified.")
+    if normalized["system_type"] == "gravity":
+        result["search"]["slope_method"] = "Directional minimum fall when axes and flow are confirmed. Surplus fall is distributed along the route and exact pitch remains a separate review check."
+        result["method"] = "Bounded XY route candidates with direction-dependent minimum fall when declared ship axes are available. Missing axes retain only the prototype slope screen."
+        result["limitations"] = [text for text in result["limitations"] if "at most three turns and a uniform slope" not in text]
+        result["limitations"].append("Drain search is bounded to at most three horizontal turns. Exact pitch, vertical offsets and more complex routes can need designer review.")
+    result["limitations"].append("Required compartments are checked after search. The current search does not plan a sequence of mandatory compartments and may miss a valid alternative.")
+    result["limitations"].append("Challenge findings based on declared measurements are bound to the assessed route. A changed centerline does not inherit manufacturing or access approval from the original.")
+    return result

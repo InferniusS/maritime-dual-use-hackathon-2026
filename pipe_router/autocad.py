@@ -25,7 +25,7 @@ def service_health():
     return {
         "service": "maritime-pipe-router",
         "api_version": API_VERSION,
-        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes"],
+        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel"],
         "units": "mm",
     }
 

@@ -1,0 +1,105 @@
+{
+  "name": "Synthetic V3 undersized bend",
+  "units": "mm",
+  "provenance": "synthetic",
+  "system_type": "pressurized",
+  "rule_profile": "fmg-v3",
+  "bounds": {
+    "min": [
+      -300,
+      -300,
+      0
+    ],
+    "max": [
+      2300,
+      1800,
+      1800
+    ]
+  },
+  "pipe": {
+    "start": [
+      0,
+      0,
+      1000
+    ],
+    "end": [
+      1000,
+      1000,
+      1000
+    ],
+    "diameter": 40,
+    "original_route": [
+      [
+        0,
+        0,
+        1000
+      ],
+      [
+        1000,
+        0,
+        1000
+      ],
+      [
+        1000,
+        1000,
+        1000
+      ]
+    ]
+  },
+  "obstacles": [],
+  "rules": {
+    "clearance": 50.8,
+    "grid_step": 250,
+    "bend_penalty": 300
+  },
+  "assumptions": [
+    "Invented challenge regression fixture. Not an organizer drawing."
+  ],
+  "engineering": {
+    "units": "mm",
+    "source_refs": [
+      "synthetic fixture"
+    ],
+    "route_points": [
+      [
+        0,
+        0,
+        1000
+      ],
+      [
+        1000,
+        0,
+        1000
+      ],
+      [
+        1000,
+        1000,
+        1000
+      ]
+    ],
+    "nominal_diameter_mm": 40,
+    "nominal_size_basis_verified": true,
+    "inventory_complete": {
+      "pieces": true
+    },
+    "pieces": [
+      {
+        "id": "fixture-piece",
+        "source_refs": [
+          "synthetic fixture piece"
+        ],
+        "centerline_length_mm": 2000,
+        "bends": [
+          {
+            "radius_mm": 20,
+            "angle_deg": 90
+          }
+        ],
+        "straight_between_bends_mm": [],
+        "weld_spacings_mm": [],
+        "planarity_deviation_mm": 0,
+        "planarity_tolerance_mm": 0
+      }
+    ]
+  }
+}

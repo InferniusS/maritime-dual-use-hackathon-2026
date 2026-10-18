@@ -286,7 +286,7 @@ function syncForm() {
   $('bend-penalty').value = layout.rules?.bend_penalty ?? 300 / factor
   $('bend-radius').value = layout.rules?.bend_radius ?? ''
   $('slope').value = (layout.rules?.min_slope ?? .01) * 100
-  $('profile').value = layout.system_type === 'gravity' ? 'prototype-gravity' : 'prototype-pressure'
+  $('profile').value = (layout.rule_profile === 'fmg-v3' ? 'challenge-' : 'prototype-') + (layout.system_type === 'gravity' ? 'gravity' : 'pressure')
   $('slope-field').hidden = layout.system_type !== 'gravity'
   unitsLabels()
   $('layout-json').value = JSON.stringify(layout, null, 2)
@@ -306,7 +306,8 @@ function clearResult() {
 function readForm() {
   const input = clone(layout)
   input.units = $('input-units').value
-  input.system_type = $('profile').value === 'prototype-gravity' ? 'gravity' : 'pressurized'
+  input.system_type = $('profile').value.endsWith('-gravity') ? 'gravity' : 'pressurized'
+  input.rule_profile = $('profile').value.startsWith('challenge-') ? 'fmg-v3' : 'prototype-unverified'
   input.rules ||= {}
   const read = id => {
     if ($(id).value.trim() === '') throw new Error('Enter a value for ' + $(id).previousElementSibling.textContent)
@@ -328,8 +329,22 @@ function showFindings(result) {
   const container = $('issues')
   container.replaceChildren()
   const issues = result.original.issues || []
+  if (result.challenge_review) {
+    paragraph('V3 challenge review. Missing evidence is not a pass.', container, 'result-heading')
+    for (const key of ['original','candidate']) {
+      const review = result.challenge_review[key]
+      if (!review) continue
+      const label = key === 'candidate' && !result.candidate ? 'rejected candidate' : key
+      paragraph(`${label}: ${review.counts.pass} pass · ${review.counts.fail} fail · ${review.counts.needs_review} need review`, container)
+      const details = document.createElement('details'), summary = document.createElement('summary')
+      summary.textContent = 'Show rule findings'
+      details.append(summary)
+      list(review.findings.map(f => `${f.status} · ${f.id}: ${f.message}`), details)
+      container.append(details)
+    }
+  }
   const context = result.normalized_layout?.cad_context
-  paragraph(issues.length ? `${issues.length} finding${issues.length === 1 ? '' : 's'} on the original route` : 'The original route passes the implemented checks.', container, 'result-heading')
+  paragraph(issues.length ? `${issues.length} geometric finding${issues.length === 1 ? '' : 's'} on the original route` : 'The original route passes the implemented geometric checks. Review rule findings separately.', container, 'result-heading')
   if (result.diagnostics?.length) {
     paragraph('What stopped the search', container, 'result-heading')
     list(result.diagnostics.map(diagnosticText), container)
@@ -362,7 +377,7 @@ function showFindings(result) {
     const delta = result.candidate.length - benchmark.baseline.validation.length
     paragraph(`Controlled test result: ${number(saved)} mm shorter than the artificial detour. The suggestion is ${number(Math.abs(delta))} mm ${delta >= 0 ? 'longer' : 'shorter'} than the unchanged CAD baseline. This tests recovery from the added change.`, container)
   }
-  if (result.candidate) paragraph(result.candidate.valid ? 'The suggested route passes the implemented checks. The review items below still apply.' : 'The suggested route has unresolved findings.', container)
+  if (result.candidate) paragraph(result.candidate.valid ? 'The suggested route passes the implemented geometric checks. Rule findings and review items still apply.' : 'The suggested route has unresolved findings.', container)
   if (result.candidate?.minimum_segment_slope != null) paragraph(`Smallest downhill slope is ${number(result.candidate.minimum_segment_slope * 100)}%.`, container)
   const details = document.createElement('details')
   const summary = document.createElement('summary')
@@ -402,6 +417,7 @@ async function run() {
     link('Open report', record.exports.report, $('exports'))
     link('Save route DXF', record.exports.dxf, $('exports'))
     link('Save result JSON', record.exports.json, $('exports'))
+    if (record.exports.excel) link('Excel review', record.exports.excel, $('exports'))
     $('exports').hidden = false
   } catch (e) {error(e.message); $('run-status').textContent = 'The calculation did not finish.'}
   finally {$('run').disabled = false}
@@ -565,7 +581,8 @@ async function applyConnections() {
     const assume = $('assume-connections').checked
     const prepare = {
       cad_id: context.cad_id, candidate_id: context.candidate_id, system_type: input.system_type,
-      clearance: input.rules.clearance, padding: context.padding_mm, reverse_flow: context.reverse_flow
+      clearance: input.rules.clearance, padding: context.padding_mm, reverse_flow: context.reverse_flow,
+      rule_profile: input.rule_profile, model_context: input.model_context, engineering: input.engineering
     }
     if (Math.abs(input.rules.clearance + input.pipe.diameter / 2 - context.pipe_envelope_mm) > 0.000001) {
       const refreshed = await request('/api/prepare-cad-layout', prepare)
@@ -628,6 +645,7 @@ async function init() {
       const next = readForm()
       const profile = config.rule_profiles.profiles.find(p => p.id === $('profile').value)
       next.system_type = profile.system_type
+      next.rule_profile = profile.rule_profile || 'prototype-unverified'
       next.rules = clone(profile.rules)
       for (const key of ['clearance','grid_step','bend_penalty','bend_radius']) if (key in next.rules) next.rules[key] /= scale[next.units]
       layout = next

@@ -1,0 +1,69 @@
+{
+  "note": "Deliberately generated cases. No confidential CAD included. Passing proves these cases only.",
+  "cases": [
+    {
+      "id": "valid-straight",
+      "layout": "valid-straight.json",
+      "expected_status": "unchanged",
+      "original_findings": {
+        "piece_length": "pass",
+        "scene_coverage": "needs_review"
+      }
+    },
+    {
+      "id": "added-detour",
+      "layout": "added-detour.json",
+      "expected_status": "improved",
+      "original_findings": {}
+    },
+    {
+      "id": "protected-passage",
+      "layout": "protected-passage.json",
+      "expected_status": "improved",
+      "original_findings": {
+        "shock_clearance": "fail"
+      }
+    },
+    {
+      "id": "fore-aft-insufficient-fall",
+      "layout": "fore-aft-insufficient-fall.json",
+      "expected_status": "no_route",
+      "original_findings": {
+        "directional_drain_slope": "fail"
+      }
+    },
+    {
+      "id": "fore-aft-correct-fall",
+      "layout": "fore-aft-correct-fall.json",
+      "expected_status": "unchanged",
+      "original_findings": {
+        "directional_drain_slope": "pass",
+        "directional_drain_pitch": "pass"
+      }
+    },
+    {
+      "id": "transverse-correct-fall",
+      "layout": "transverse-correct-fall.json",
+      "expected_status": "unchanged",
+      "original_findings": {
+        "directional_drain_slope": "pass"
+      }
+    },
+    {
+      "id": "undersized-bend",
+      "layout": "undersized-bend.json",
+      "expected_status": "no_route",
+      "original_findings": {
+        "bend_radius": "fail"
+      }
+    },
+    {
+      "id": "welds-too-close",
+      "layout": "welds-too-close.json",
+      "expected_status": "no_route",
+      "original_findings": {
+        "weld_spacing": "fail"
+      }
+    }
+  ]
+}

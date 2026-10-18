@@ -151,7 +151,8 @@ def _endpoint_contacts(points, boxes, envelope):
 
 def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=50.0,
                        padding=500.0, reverse_flow=False, endpoint_connections=None,
-                       max_stub_length=250.0):
+                       max_stub_length=250.0, rule_profile="prototype-unverified",
+                       model_context=None, engineering=None):
     """Create a single-run test without editing the imported CAD result.
 
     Inputs must be the full importer output already in millimetres. Source
@@ -312,6 +313,28 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
                    "method": "Imported analytic surface axes with unverified within-solid connectivity"},
         "cad_context": context,
     }
+    result["rule_profile"] = rule_profile
+    if engineering is not None:
+        result["engineering"] = deepcopy(engineering)
+    if model_context is not None:
+        from .model_context import apply_model_context
+        result = apply_model_context(result, model_context, cad.get("source_sha256"))
+        # Context geometry participates in contact discovery before connector
+        # exemptions are offered. All other obstacles remain active.
+        contacts = []
+        for endpoint, point in (("start", points[0]), ("end", points[-1])):
+            for obstacle in result["obstacles"]:
+                shape = core._prepare_obstacle(obstacle, "context contact", envelope)
+                if core._segment_intersects_box(tuple(point), tuple(point), shape):
+                    source = next((r for r in result["cad_context"]["obstacle_sources"] if r["id"] == obstacle["id"]), {})
+                    contacts.append({"endpoint": endpoint, "obstacle_id": obstacle["id"],
+                                     "source_handle": source.get("source_handle", obstacle["id"])})
+        result["cad_context"]["endpoint_contacts"] = contacts
+        result["cad_context"]["counts"].update({"checked_obstacles": len(result["obstacles"]),
+            "pipe_shaped_obstacles": sum("capsules" in o for o in result["obstacles"]),
+            "fallback_box_obstacles": sum("capsules" not in o for o in result["obstacles"]), "endpoint_contacts": len(contacts)})
+    if rule_profile == "fmg-v3" and clearance < 50.8 - core.EPSILON:
+        raise ValueError("The V3 challenge profile requires at least 50.8 mm shock clearance")
     if endpoint_connections:
         from .workflow import with_endpoint_connections
         result = with_endpoint_connections(result, endpoint_connections, max_stub_length)

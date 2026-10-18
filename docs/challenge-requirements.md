@@ -1,60 +1,86 @@
-# Confirmed Track 2 requirements
+# Track 2 requirements
 
-The screenshot supplied by the team already contains the success criteria and minimum requirements. The slide deck adds the intended workflow and scope. These are the development baseline. Do not ask the team to collect these requirements again.
+The baseline is the five-page `[n2 Eng] Pipe Layout Optimization V3-.pdf` supplied by the team on October 17. Pages 1 and 2 contain detailed engineering rules. Page 3 contains the success criteria. Pages 4 and 5 list the supplied confidential drawings. The earlier screenshots and presentation remain useful context, but the numeric rules are no longer missing.
 
-## Sources reviewed
+Do not commit the supplied drawings or their extracted geometry to GitHub. Keep generated reports containing that geometry local too.
 
-- The user-supplied Notion screenshot of the success criteria and constraints
-- The eight-page Piping Layout Optimization presentation supplied by the user
-- [Build Resources](https://mindthebridge.notion.site/Build-Resources-0a16d868852445dabb0c25912590de56)
-- [Hack Pack](https://app.notion.com/p/mindthebridge/Hack-Pack-a85a519c9a514f599bd0ea1a3435d3f2)
+## What the final tool must do
 
-The Notion page text was rechecked in the browser. Its embedded PDFs reported loading errors. This review does not claim to have inspected every linked document or the private team page.
+Improve existing piping in its permitted spaces while preserving system function and component sizes. Evaluate alternatives against surrounding structure, equipment and other systems. Minimize direction and elevation changes while meeting the requirements. An existing route may be correct or may need repair.
 
-## Requirements and current coverage
+Page 2 asks for changes in AutoCAD, a scaled and dimensioned view and an Excel parts list with global coordinates. Page 3 also permits precise information that a designer can use to implement the changes. A review centerline alone is not the complete implementation package.
 
-| Documented requirement | Current coverage | Work still needed |
+The live demonstration may show the result in AutoCAD or Navisworks. The program must run on the supplied laptop. The brief describes AI optimization but does not require training a new neural model. Explain the actual search method accurately.
+
+## Numeric rules from V3
+
+Page numbers below are PDF page numbers. A rule being listed here does not mean that every part of it is implemented. The result report must distinguish a checked value from missing evidence.
+
+| Rule | Source | Interpretation and evidence needed |
 | --- | --- | --- |
-| Improve an existing layout in its intended spaces | Joined CAD chains can be tested in a local box. A generated detour in real CAD context has been shortened | Preserve real intermediate connections and replace assumed search bounds with permitted routing spaces |
-| Keep piping component sizes unchanged | One outer diameter stays fixed within each routing input | Verify all component sizes from real data |
-| Stay inside ship structure | Synthetic boxes and assumed local CAD test boxes | Use actual ship boundaries and allowed passages |
-| Avoid clashes with structure and other systems | Continuous box checks. CAD candidate tests use boxes around nearby extracted solid samples | Include missing structure and nearby systems. Verify complete physical envelopes |
-| Do not route a small pipe inside a larger pipe or duct | Occupied boxes are treated as blocked space | Explicitly represent the occupied envelopes of real pipes and ducts |
-| Use standard commercially available fittings | Manufacturer dimensions shown as a reference. Optional bend tangent length check | Select appropriate fittings and check their full physical shapes |
-| Preserve system function and correct drain pitch | Gravity checks enforce start-to-end downhill flow and a selected minimum slope | Verify real flow direction and required slope. Add other functional checks |
-| Work across piping systems | Pressure and gravity searches exercised on eight synthetic layouts | Demonstrate reviewed real inputs and additional system rules |
-| Change the CAD model or provide precise implementation information | Centerline DXF and exact coordinates. The team confirmed saving a separate review centerline from the small AutoCAD line test. Source handles and drawing identity remain attached | Check real solid input and Undo inside AutoCAD. Supply complete fitting changes and verify component identity |
-| Live run on the supplied model with results shown in AutoCAD or Navisworks | Simple line routing works inside AutoCAD on the event laptop. The snapshot API was tested with the cooling drawing on the Mac. The browser workflow remains available | Demonstrate the real drawing snapshot and routing path inside AutoCAD on the event laptop |
-| Run on the provided laptop | The team confirmed the simple AutoCAD line test and saved suggestion on the Snapdragon laptop | Verify real drawing export and solid extraction and routing on that laptop |
-| Flag issues needing designer intervention | Reports identify unverified chains and endpoint contacts. Bounded unchanged connection stubs require an explicit local assumption. Source references remain attached | Review component identity and resolve unsupported engineering checks |
+| Minimize changes in direction and elevation | Page 1 | Optimization objective. Sampled points along one curved bend must not be counted as separate manufactured bends. |
+| Vertical hanger distance at most 15 in / 381 mm | Page 1 | Measured from pipe center to ship structure. The brief permits longer distances but says to minimize them. Treat excess as a preference finding rather than an automatic rejection. Needs support and structure identification. |
+| Horizontal hanger length at most 2 in | Page 1 | 50.8 mm by exact conversion. Measured from pipe edge to ship structure. Needs hanger orientation and attachment identification. |
+| Shock clearance of 2 in | Page 1 | 50.8 mm by exact conversion. Applies to structure, distributed systems and equipment. Keep contact exceptions explicit and bounded. |
+| Walkway headroom of 77 in or 1960 mm | Page 1 | Use the published 1960 mm metric value and record the rounding difference. Requires a walkway surface and a vertical direction. |
+| Horizontal valve stems at heights 229 to 1829 mm | Page 1 | Outside these limits is allowed but not recommended. Requires stem orientation and local accessible standing surface. |
+| Upward vertical valve stems at heights 150 to 1295 mm | Page 1 | Preference with the same explicit exception. |
+| Downward vertical valve stems no higher than 1980 mm | Page 1 | Preference with the same explicit exception. No lower limit is supplied. |
+| Maximum pipe length 20 ft / 6096 mm | Page 2 | Measured along the centerline of one fabricated pipe length. A longer connected route may consist of several lengths. Do not reject an entire route just because its total exceeds this value. |
+| Welds at least 25 mm apart | Page 2 | Requires actual weld locations and the intended measurement path. A centerline vertex is not automatically a weld. |
+| Elbow cutbacks in 5 degree increments | Page 2 | Stated as a manufacturing preference. Needs actual fitting cutback angles. |
+| Pipe size 50 mm or smaller: bend radius at least 152.4 mm and straight length between bends at least 101.6 mm | Page 2 | Needs verified size designation, bend radius and tangent-to-tangent straight length. Do not derive the size class directly from measured outside diameter. |
+| Pipe size 80 mm: bend radius at least 228.6 mm and straight length at least 177.8 mm | Page 2 | The brief does not provide rules for sizes between the listed categories. |
+| Pipe size 100 mm or larger: bend radius at least 304.8 mm and straight length at least 228.6 mm | Page 2 | Same size and measurement requirements. |
+| At most 3 bends per pipe length | Page 2 | Needs fabricated length boundaries and real bend identities. A sampled curve may contain many points but remain one bend. |
+| Bent pipe should lie generally in one plane | Page 2 | Transport preference. The brief supplies no numerical planarity tolerance. |
+| Pipe bends in 5 degree increments | Page 2 | Manufacturing preference. CAD tessellation angles are not manufactured bend angles. |
+| Penetrations at least 2 in / 50 mm from stiffeners and other penetrations | Page 2 | Source values differ by 0.8 mm. A conservative 50.8 mm assessment must identify that choice. Needs penetration and stiffener geometry. |
+| At least one pipe diameter of direction change between two decks or bulkheads | Page 2 | Straight runs between them are prohibited. Needs identified penetrations and an agreed geometric interpretation of the offset. |
+| Pitched pipe slope 1:25 fore and aft | Page 2 | 0.04 fall per horizontal distance. Needs ship axes, flow direction and verified pitch geometry. |
+| Pitched pipe slope 1:100 athwartship | Page 2 | 0.01 fall per horizontal distance. The brief does not define tolerance or a formula for diagonal runs. |
 
-The challenge describes AI optimization. The reviewed material does not specify training a new model or using a particular neural model. The implementation must explain its optimization approach accurately.
+## Other rules that need model context
 
-## Hardware decision
+| Requirement | Source | Evidence needed |
+| --- | --- | --- |
+| Piping must remain inside ship structure | Pages 2 and 3 | Actual hull and compartment geometry. An assumed local search box does not establish this. |
+| No clashes with structure, distributed systems or equipment | Pages 1 and 3 | Complete aligned surroundings and checked physical envelopes. |
+| Do not route through other pipes, ducts or wireways | Pages 2 and 3 | Include occupied interiors too. A smaller pipe cannot use the hollow interior of a larger one as free space. |
+| Keep walkways and passageways navigable | Pages 1 and 2 | Walkway, ladder and access-space identification. Clearance from metal alone is insufficient. |
+| No tripping hazards | Page 1 | Perceived passageways and floor levels. |
+| Pipe must be installable | Page 2 | Installation sequence and access. The example of a straight pipe through three consecutive frames shows why collision-free final geometry alone is insufficient. |
+| Prefer horizontal and vertical routing | Page 2 | Drain and vent pitch is an explicit exception. |
+| Minimize local low and high points | Page 2 | Flow direction and continuous centerline. |
+| Valves and equipment are already in the correct spaces | Page 2 | Valves may move within the same space. Do not infer permission to move them across compartments. |
+| Preserve required intermediate spaces | Page 2 | A route must still pass through every required original space even when there is no valve or equipment there. |
+| Preserve component sizes | Page 3 | Verify original component sizes and compare each affected part. |
+| Use standard commercially available fittings | Page 3 | Suitable catalog records and physical dimensions. Shape recognition alone does not establish material, pressure rating or availability. |
+| Work across piping systems | Page 3 | Pressure and pitched systems plus reviewed cases beyond one drawing or component. |
+| Identify issues needing designer intervention | Slide workflow and page 3 implementation alternative | Explain failed checks and missing evidence without labeling them compliant. |
 
-The core application must run on the provided laptop. Both public Notion pages state that hardware is optional. Build Resources specifically describes hardware as optional for the piping track.
+## Current verified foundation
 
-Use the Mac for development and testing. Prepare the event laptop as the execution and demonstration target. IQ9 may be an optional extension. Do not make it a dependency unless organizers give updated instructions. No board performance benefit has been measured.
+The real cooling drawing has completed the AutoCAD plugin loop on the Snapdragon laptop. The team supplied a screenshot showing review centerline `26B9` saved on `MARITIME_SUGGESTION`. Source objects were not replaced.
 
-## Remaining details to locate
+That DB1 test used the old provisional 50 mm clearance. Its original length was about 2413.467 mm and its accepted suggestion was 2558 mm. The selected route had 16 inferred points. It was checked against 76 nearby components, using 43 pipe-shaped envelopes and 33 fallback boxes. This is a real drawing test of one route. It is not a proof of a globally shortest route, full-system optimization or compliance with all V3 requirements. Saving the review object is separate from saving the drawing file to disk.
 
-These details are not specified in the reviewed screenshot or presentation. They may be in the referenced standards or another resource. Search the provided materials first. Ask the mentor only for unresolved details.
+The importer can join some unambiguous same-diameter chains. It stops at branches and uncertain connections. The routing engine preserves selected endpoints and bounded end sections. Supported solids use conservative pipe envelopes. Other solids retain boxes. The browser remains a fallback.
 
-- Model units and alignment between system drawings
-- The actual engineering standards referenced by the brief
-- Required numeric drain slopes and flow direction
-- Any required additional clearance beyond avoiding physical clashes
-- Permitted fitting catalogs or fitting dimensions
-- Which source geometry defines the ship boundaries and surrounding obstacles
+See [the standards iteration](standards-iteration.md) for this iteration's delivered scope and remaining acceptance steps.
 
-The team has authorized continuing with provisional units and rules. The current 150 mm and 50 mm clearances are test settings. The default 1 percent drain slope is also provisional. They are not official requirements. Units can be corrected by rescaling all coordinates and lengths and running the checks again.
+## Surrounding files and remaining decisions
 
-## Next milestone
+The V3 file list includes structure, equipment, ventilation and wireway drawings as well as several piping systems. A cooling-only snapshot cannot establish clearance against all those surroundings. Include the relevant source files in a shared coordinate system and record what was actually included.
 
-The current iteration has a checked three-component route from the real cooling drawing. Its original centerline is 3679.25 mm long. All 36 nearby obstacle boxes remain active at 50 mm provisional clearance. Four start contacts are treated as bounded fixed connections for the local test. Their engineering identities remain unverified.
+The known numeric rules do not need to be requested again. These model-specific details still need evidence:
 
-A clearly labeled artificial detour increases this route to 4179.25 mm. The search reduces it to 3728.30 mm. That is recovery from a generated change. It does not beat the untouched CAD baseline. The unchanged baseline remains the preferred result when tested on its own.
+- Drawing units and alignment between files
+- Ship fore-and-aft, athwartship and up directions
+- Flow direction and floor levels
+- Pipe size designation and fabricated length boundaries
+- Fitting, weld, support and valve identities
+- Permitted spaces, access volumes and complete surrounding geometry
+- Any approved exception and rule tolerance
 
-The simple line command and saving a suggested centerline have now been confirmed on the event laptop. The immediate milestone is testing `MARITIMECAD` with the real cooling drawing there. This command sends a drawing snapshot to the same Python search and brings the result back as a review centerline. The source solids remain intact. The browser app is preserved as a fallback.
-
-The remaining routing milestones are to retain equipment and branch connections through longer routes and use more complete collision geometry. Then provide fitting changes that a designer can implement. The present local box and sample-based obstacle boxes do not establish full ship coverage.
+Continue development with explicit assumptions. Unknown information must remain visible in the result. A missing check is not a pass.

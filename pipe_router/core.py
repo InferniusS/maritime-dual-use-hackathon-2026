@@ -329,10 +329,13 @@ def _compress(points: list[Point]) -> list[Point]:
     return compressed
 
 
-def _search(prepared: _Layout) -> tuple[list[Point] | None, dict]:
+def _search(prepared: _Layout, *, segment_filter=None) -> tuple[list[Point] | None, dict]:
     summary = {"expanded_states": 0, "grid_nodes": 0}
     if not _inside(prepared.start, prepared.interior) or not _inside(prepared.end, prepared.interior):
         summary["reason"] = "A fixed endpoint does not fit inside the supplied bounds"
+        return None, summary
+    if segment_filter and not all(segment_filter(p, p) for p in (prepared.start, prepared.end)):
+        summary["reason"] = "A fixed endpoint is outside the declared allowed spaces"
         return None, summary
     blocked = [
         {"endpoint": endpoint, "point": list(point), "obstacle": obstacle.id}
@@ -393,6 +396,8 @@ def _search(prepared: _Layout) -> tuple[list[Point] | None, dict]:
             clear = edges.get(edge_key)
             if clear is None:
                 clear = not any(_segment_intersects_box(current_point, neighbor_point, obstacle) for obstacle in prepared.obstacles)
+                if clear and segment_filter is not None:
+                    clear = segment_filter(current_point, neighbor_point)
                 edges[edge_key] = clear
             if not clear:
                 continue

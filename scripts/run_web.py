@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_bytes(200, self.workspace.plotly, "text/javascript; charset=utf-8")
             elif path.startswith("/downloads/"):
                 parts = path.split("/")
-                if len(parts) != 4 or not re_identifier(parts[2]) or parts[3] not in ("result.json", "route-centerlines.dxf", "report.html", "cad-inspection.json"):
+                if len(parts) != 4 or not re_identifier(parts[2]) or parts[3] not in ("result.json", "route-centerlines.dxf", "report.html", "cad-inspection.json", "route-review.xlsx"):
                     return self.fail(404, "Unknown export")
                 target = self.workspace.output / parts[2] / parts[3]
                 if not target.is_file():
@@ -230,12 +230,14 @@ class Handler(BaseHTTPRequestHandler):
         report = {"generated_at": datetime.now(timezone.utc).isoformat(), "input_layout": layout, "layout": normalized, "result": result}
         (folder / "result.json").write_text(json.dumps(report, indent=2, allow_nan=False), encoding="utf-8")
         write_dxf(normalized, result, folder / "route-centerlines.dxf")
+        from pipe_router.review_export import write_review_xlsx
+        write_review_xlsx(normalized, result, folder / "route-review.xlsx")
         # The standalone renderer is shared with the original demo.
         display_result = {**result, "search": {**result.get("search", {}), "reason": result.get("search", {}).get("reason", "Finished the implemented checks")}}
         write_html(normalized, display_result, result.get("runtime_seconds", 0), folder / "report.html")
         self.send_json(200, {"layout": normalized, "result": result,
             "exports": {name: f"/downloads/{identifier}/{filename}" for name, filename in (
-                ("json", "result.json"), ("dxf", "route-centerlines.dxf"), ("report", "report.html")
+                ("json", "result.json"), ("dxf", "route-centerlines.dxf"), ("report", "report.html"), ("excel", "route-review.xlsx")
             )}})
 
     def import_cad(self, payload):
@@ -306,6 +308,8 @@ class Handler(BaseHTTPRequestHandler):
             reverse_flow=reverse_flow,
             endpoint_connections=payload.get("endpoint_connections"),
             max_stub_length=payload.get("max_stub_length", 250),
+            rule_profile=payload.get("rule_profile", "prototype-unverified"),
+            model_context=payload.get("model_context"), engineering=payload.get("engineering"),
         )
         layout.setdefault("cad_context", {})["cad_id"] = identifier
         if "autocad_context" in cad:
@@ -372,7 +376,7 @@ def main():
     server = make_server(args.port, args.output, args.cad_sample, args.host)
     display_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     print(f"Workspace: http://{display_host}:{server.server_port}/", flush=True)
-    print("Provisional rules. Processing stays on this computer. Press Ctrl+C to stop.", flush=True)
+    print("Local routing and rule checks. Processing stays on this computer. Press Ctrl+C to stop.", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

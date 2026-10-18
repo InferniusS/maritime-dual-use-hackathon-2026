@@ -4,16 +4,16 @@ AutoCAD 2027 is already installed on the event laptop. The setup photo also show
 
 AutoCAD and the Python routing service run on this same laptop. The Mac and IQ9 board do not need to be connected.
 
-The team has saved the small line suggestion inside AutoCAD and received a result from the real cooling drawing on this laptop. The newest pipe-shape geometry update passed its Mac checks. Its real-drawing preview and Save still need the venue test.
+The team has saved both the small line suggestion and a real cooling-drawing suggestion on this laptop. The latest [standards and model context iteration](standards-iteration.md) adds the V3 Challenge profile, optional model context and Excel review reports. Those new features have passed Mac checks and still need this venue test.
 
 ## Update an existing working setup
 
-This update changes the geometry reader and routing code as well as the plugin. Follow these steps if Python is already installed and the small test works.
+This update changes the rule checks, model context, reports and plugin. Follow these steps if Python is already installed and the small test works.
 
 1. Save any drawing work you need and close AutoCAD completely.
 2. In the Python PowerShell window press **Ctrl+C**. Wait for the `PS` prompt.
 3. Download the latest repo ZIP and extract it into a temporary folder.
-4. Copy the new `pipe_router` and `scripts` and `autocad-plugin` folders into your existing project folder. Merge folders and replace matching files. Also copy `web` and `tests` and `docs` and `README.md` to keep the fallback and instructions current.
+4. Copy the new `pipe_router` and `scripts` and `autocad-plugin` folders into your existing project folder. Merge folders and replace matching files. Also copy `examples`, `web`, `tests`, `docs`, `README.md`, `requirements.txt` and `requirements-lock.txt` to keep the new checks and instructions current.
 5. Keep your existing `.venv` and `data` folders and your drawing files.
 6. In PowerShell open the existing project folder. For the team's Desktop setup use:
 
@@ -21,13 +21,21 @@ This update changes the geometry reader and routing code as well as the plugin. 
 cd "$env:USERPROFILE\Desktop\maritime-dual-use-hackathon-2026-main"
 ```
 
+Check the eight public V3 examples before starting the service:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_challenge.py
+```
+
+Expect eight `PASS` lines and a report folder. A blocked case can pass this test because rejecting that input is its expected outcome. Open a case's `report.html` or `route-review.xlsx` to see the explanation.
+
 Start the service:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_web.py
 ```
 
-Leave that window running. Open [the health page](http://127.0.0.1:8767/api/health) on the Snapdragon and refresh it. The `capabilities` list must include **`pipe_envelopes`**. If it does not you are still running older Python files.
+Leave that window running. Open [the health page](http://127.0.0.1:8767/api/health) on the Snapdragon and refresh it. The `capabilities` list must include **`challenge_rules_v3`**, **`model_context`** and **`review_excel`**. If they are missing you are still running older Python files.
 
 Reopen AutoCAD and run `NETLOAD`. Choose the fresh `autocad-plugin\prebuilt\Maritime.AutoCAD.dll` from the existing project folder. Then follow section 6 to rerun `MARITIMECAD`. Review the listed end contacts before accepting them.
 
@@ -113,7 +121,7 @@ Workspace: http://127.0.0.1:8767/
 
 Leave this window open. The command stays running and does not return to the PowerShell prompt. That is expected. AutoCAD sends its requests to this process.
 
-On the Snapdragon laptop open [the service check](http://127.0.0.1:8767/api/health) in a browser. It should show `maritime-pipe-router` with `api_version` set to `1` and `units` set to `mm`. The latest geometry service includes `pipe_envelopes` in its capabilities.
+On the Snapdragon laptop open [the service check](http://127.0.0.1:8767/api/health) in a browser. It should show `maritime-pipe-router` with `api_version` set to `1` and `units` set to `mm`. The current service includes `challenge_rules_v3`, `model_context` and `review_excel` in its capabilities.
 
 That address always means the computer where you open it. Opening it on the Mac does not check the Snapdragon service. Once you have checked it you can close the browser tab. The PowerShell service must stay running.
 
@@ -205,11 +213,12 @@ For the first cooling test use these settings:
 | --- | --- |
 | Interpret drawing coordinates as | `Millimetres` |
 | Pipe system | `Pressure` |
-| Clearance in mm | `50` |
+| Rule profile | `Challenge` |
+| Clearance in mm | `50.8` |
 | Local search padding in mm | `500` |
 | Search grid step in mm | `250` |
 
-These are the editable assumptions used in our existing test. They are not confirmed engineering standards.
+Challenge uses the V3 brief and requires at least 50.8 mm shock clearance. Millimetres are still an interpretation of the drawing units. The padding and grid are search settings. For an exact replay of the old 50 mm test, select `Prototype` explicitly. Do not describe that old test as a V3 run.
 
 The command lists possible routes associated with the selected object. Enter the number of the route you want to check. Joined routes appear before individual runs.
 
@@ -217,7 +226,7 @@ The chosen route appears in cyan before the calculation. Check that it follows t
 
 If obstacle envelopes touch its ends the command lists those contacts. The default answer to treating them as intended fixed connections is **No**. Choose Yes only after reviewing them. It preserves a bounded section at each accepted end. The initial maximum length is 250 mm. This is a cap rather than a command to preserve exactly 250 mm. It does not remove those obstacles from checks on the movable middle.
 
-The latest Mac test of source handle `DB1` returns a 2558.00 mm checked replacement for the 2413.47 mm original. The original fails the selected 50 mm clearance near source `DD7`. The longer suggestion repairs that issue under the implemented checks. Its local test keeps 43 pipe-shaped obstacles and 33 fallback boxes. The live Snapdragon result still needs review against the drawing.
+The latest Mac replay of source handle `DB1` at 50.8 mm clearance returns a 2558.00 mm checked replacement for the 2413.47 mm original. The longer suggestion addresses the modeled clearance issue under the implemented checks. Its local test keeps 43 pipe-shaped obstacles and 33 fallback boxes. The previous 50 mm run was saved successfully on the Snapdragon as object `26B9`. This update needs a new live run with the Challenge profile.
 
 Our saved cooling example uses source handle `DB2` and a joined route containing `DB2` and `E6D` and `E16`. Its inferred diameter is 88.9 mm and its original length is about 3679.25 mm. You can inspect a selected object's handle with AutoCAD's `LIST` command. Handles can differ if the source drawing has changed.
 
@@ -232,7 +241,23 @@ Other outcomes need review:
 - A block with more than 50 matching candidates needs a narrower selection.
 - The current snapshot limit is 48 MB. If it is exceeded use a smaller working drawing that still includes the relevant surrounding geometry.
 
-The command prints local links to result JSON and a centerline DXF and an HTML report. Copy those addresses into the browser on the same laptop. Generated files are also saved under `data\generated\workspace` in the repo folder. Keep the reports when sharing a result or reporting an issue.
+The command prints local links to result JSON, a centerline DXF, an HTML report and an Excel review workbook. The report now has a Challenge rule review section. Read its failures and `needs_review` items. The workbook contains rule findings and coordinates. It is not yet a manufactured parts list. Copy those addresses into the browser on the same laptop. Generated files are also saved under `data\generated\workspace` in the repo folder. Keep the reports when sharing a result or reporting an issue.
+
+### Include reviewed surroundings and engineering evidence
+
+A test without supplemental context is allowed, but the report must flag missing ship structure, access spaces and part evidence. Loading a context file does not automatically establish full coverage.
+
+For a prepared and reviewed context JSON, activate the intended drawing and enter:
+
+```text
+MARITIMECONTEXT
+```
+
+Choose `Load` and select that JSON file. Run the command with `Status` to confirm that a file is loaded. Use `Clear` to remove it. Then run `MARITIMECAD` as above.
+
+The file belongs to the drawing fingerprint for this AutoCAD session. Reload it after restarting AutoCAD. It can be a raw context object or a wrapper with `model_context` and optional `engineering`. The service validates the contents when preparing a selected route. A loaded file can still be rejected if its geometry or evidence is invalid.
+
+The [context preparation steps](standards-iteration.md#add-reviewed-surroundings) explain the template and `scripts/build_model_context.py`. Context preparation requires verified units and alignment. The tool does not automatically align separate drawings or invent missing part identities.
 
 ## 7. Start again later
 
@@ -242,7 +267,7 @@ You only need the package installation once for this project folder. After resta
 .\.venv\Scripts\python.exe scripts\run_web.py
 ```
 
-Then open AutoCAD. Load the DLL with `NETLOAD` again for a new AutoCAD session and run the command you need.
+Then open AutoCAD. Load the DLL with `NETLOAD` again for a new AutoCAD session. Reload any reviewed context with `MARITIMECONTEXT` before running `MARITIMECAD`.
 
 To stop the Python service press Ctrl+C in its PowerShell window. Closing the browser does not stop it. Closing the PowerShell window does stop it.
 
@@ -258,7 +283,7 @@ An earlier venue run reported `ResponseEnded` before `/api/run` reached Python. 
 
 If this returns after an update keep both the full AutoCAD error and the latest PowerShell lines. Check the health page. Use the same repo version for the Python files and DLL. Restart both through [the update steps](#update-an-existing-working-setup).
 
-The current geometry update is larger than the earlier connection patch. Replacing only `run_web.py` leaves out the new pipe-shape checks.
+The current update is larger than the earlier connection patch. Replacing only `run_web.py` leaves out the new rule checks and model context.
 
 ### A calculation returns no accepted route
 
@@ -302,3 +327,7 @@ In **Check a route** use **Open a layout file** to open `examples\real-cad-demo\
 For a saved view without Python open `examples\real-cad-demo\report.html` directly from the extracted folder. It works offline.
 
 The Mac remains our development machine. The Snapdragon laptop runs the demo. IQ9 is not part of this workflow and no model training is required.
+
+## Navisworks
+
+Keep AutoCAD for this iteration. Navisworks is optional for reviewing a combined model. Manage adds clash detection, but it does not implement our missing routing or manufacturing checks. See [the Navisworks assessment](standards-iteration.md#navisworks-decision). No Navisworks installation on Snapdragon has been verified.

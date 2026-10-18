@@ -1,0 +1,28 @@
+{
+  "model_context": {
+    "schema_version": 1,
+    "units": "mm",
+    "coordinate_frame": {
+      "id": "replace-with-your-reviewed-coordinate-frame-name",
+      "shared_coordinates_confirmed": false
+    },
+    "ship_axes": {
+      "longitudinal": null,
+      "transverse": null,
+      "up": null,
+      "confirmed": false
+    },
+    "coverage": {
+      "structure": {"included": false, "reviewed": false, "source_refs": []},
+      "equipment": {"included": false, "reviewed": false, "source_refs": []},
+      "piping": {"included": false, "reviewed": false, "source_refs": []},
+      "ventilation": {"included": false, "reviewed": false, "source_refs": []},
+      "wireways": {"included": false, "reviewed": false, "source_refs": []}
+    },
+    "allowed_spaces": [],
+    "required_space_ids": [],
+    "boundary_clearance_mm": 0,
+    "keep_outs": [],
+    "drawing_files": []
+  }
+}

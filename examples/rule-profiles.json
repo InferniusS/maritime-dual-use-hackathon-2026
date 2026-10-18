@@ -43,6 +43,39 @@
         "This profile records requirements for the prototype. A profile alone does not establish that every listed check or fitting is implemented.",
         "Drain sizing and venting are not established by passing a geometric slope check."
       ]
+    },
+    {
+      "id": "challenge-pressure",
+      "name": "V3 challenge pressure pipe",
+      "system_type": "pressurized",
+      "rule_profile": "fmg-v3",
+      "units": "mm",
+      "status": "partial-checks",
+      "rules": {
+        "clearance": 50.8,
+        "grid_step": 250,
+        "bend_penalty": 300
+      },
+      "assumptions": [
+        "Source: supplied Pipe Layout Optimization V3 brief. Some checks require declared engineering measurements and model context. Missing evidence is reported for review."
+      ]
+    },
+    {
+      "id": "challenge-gravity",
+      "name": "V3 challenge gravity drain",
+      "system_type": "gravity",
+      "rule_profile": "fmg-v3",
+      "units": "mm",
+      "status": "partial-checks",
+      "rules": {
+        "clearance": 50.8,
+        "grid_step": 250,
+        "bend_penalty": 300,
+        "min_slope": 0.01
+      },
+      "assumptions": [
+        "Source: supplied Pipe Layout Optimization V3 brief. Some checks require declared engineering measurements and model context. Missing evidence is reported for review."
+      ]
     }
   ],
   "fittings": [
@@ -120,7 +153,7 @@
     }
   ],
   "notices": [
-    "These profiles are editable prototype settings. They are not official ship rules or a declaration of standards compliance.",
+    "Prototype profiles remain provisional. V3 profiles use challenge values with explicit findings for missing evidence. No profile certifies complete compliance.",
     "Changing a units label is not a unit conversion. When the source units are confirmed, convert all coordinates and linear dimensions consistently before running checks again.",
     "Do not change the physical size of a source pipe to match an entry in this small fitting catalog. An unmatched diameter requires an appropriate fitting record or human review.",
     "The catalog records do not establish an allowed material or pressure class for the challenge. They do not include fabrication tolerances or weld access allowances.",
