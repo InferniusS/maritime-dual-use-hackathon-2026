@@ -18,6 +18,7 @@ from .network_model import normalize_network, network_digest, graph_summary
 from .workflow import run_workflow
 from .network_standards import requirement, bend_requirement
 from .network_runtime import cancellation_scope
+from .network_objective import network_metrics, resolve_objective
 
 _CACHE = OrderedDict()
 _CACHE_LOCK = threading.Lock()
@@ -25,6 +26,8 @@ CACHE_LIMIT = 128
 CACHE_BYTES_LIMIT = 16 * 1024 * 1024
 MAX_EVALUATIONS = 64
 MAX_SEARCH_SPANS = 16
+MAX_SECONDS = 120.
+DEFAULT_SECONDS = 30.
 
 
 def _length(points):
@@ -41,19 +44,9 @@ def _bends(points):
     return count
 
 
-def metrics(network, reference=None):
-    refs = {s["id"]: s for s in reference["spans"]} if reference else {}
-    length = sum(_length(s["points"]) for s in network["spans"])
-    bends = sum(_bends(s["points"]) for s in network["spans"])
-    up = network.get("coordinate_system", {}).get("up", [0,0,1])
-    elevation = sum(abs(sum((y-x)*z for x,y,z in zip(a,b,up))) for s in network["spans"] for a,b in zip(s["points"], s["points"][1:]))
-    modified = sum(_length(s["points"]) for s in network["spans"] if s["id"] in refs and s["points"] != refs[s["id"]]["points"])
-    # Transparent numerical objective in equivalent millimetres. Hard checks
-    # are gates, never penalty terms. Preferences get a separate small weight.
-    score = length + 150.*bends + .05*elevation + .02*modified
-    return {"length_mm": length, "direction_changes": bends, "fitting_requirements": bends,
-            "elevation_change_mm": elevation, "modified_length_mm": modified, "objective": score,
-            "objective_weights": {"length":1., "direction_changes_mm":150., "elevation":.05,"modification":.02,"preference_warning_mm":25.}}
+def metrics(network, reference=None, *, strategy=None, objective_weights=None, validation=None):
+    """Source-normalized comparison; hard constraints are never penalties."""
+    return network_metrics(network, reference, strategy=strategy, objective_weights=objective_weights, validation=validation)
 
 
 def _at_distance(points, amount):
@@ -70,6 +63,7 @@ def _neighbor_obstacle(other, span, network):
     points = deepcopy(other["points"])
     nodes = {n["id"]: n for n in network["nodes"]}
     common = {other["from_node"],other["to_node"]} & {span["from_node"],span["to_node"]}
+    contacts = []
     for nodeid in common:
         # Explicit locally bounded port contact only. Remote parts of incident
         # spans remain active obstacles, including folds back toward the route.
@@ -78,6 +72,7 @@ def _neighbor_obstacle(other, span, network):
         body = nodes[nodeid].get("dimensions",{}).get("body_radius_mm")
         if declared is not None and body is not None and 0 < declared <= min(1000,body+radius):
             radius = max(radius,declared)
+        contacts.append((nodes[nodeid]["position"], radius))
         if radius > 0:
             reverse = other["to_node"] == nodeid
             if reverse:
@@ -87,10 +82,27 @@ def _neighbor_obstacle(other, span, network):
                 points.reverse()
     if len(points) < 2:
         return None
-    radius = max(other["outer_diameter_mm"]/2., other.get("fitting_catalog", {}).get("body_radius_mm", 0.))
+    radius = max(other["outer_diameter_mm"]/2., (other.get("fitting_catalog") or {}).get("body_radius_mm") or 0.)
     caps = [{"start":a,"end":b,"radius":radius} for a,b in zip(points,points[1:])]
-    return {"id":f"network-span:{other['id']}", "min":[min(p[i] for p in points)-radius for i in range(3)],
-            "max":[max(p[i] for p in points)+radius for i in range(3)], "capsules":caps}
+    # Rounded elbows occupy the inside of a corner, away from both sharp
+    # centerline legs. Reserve their actual conservative arc sweeps too; merely
+    # thickening the sharp legs can miss this volume. Only arcs entirely inside
+    # an explicit connected-port neighbourhood are exempted during planning.
+    from .network_fittings import fitting_envelopes
+    for fitting in fitting_envelopes(other)["fittings"]:
+        for cap in fitting["capsules"]:
+            if not any(max(math.dist(cap["start"], center), math.dist(cap["end"], center))+cap["radius"] <= contact_radius for center, contact_radius in contacts):
+                caps.append(deepcopy(cap))
+    item = {"id":f"network-span:{other['id']}",
+            "min":[min(min(cap["start"][i],cap["end"][i])-cap["radius"] for cap in caps) for i in range(3)],
+            "max":[max(max(cap["start"][i],cap["end"][i])+cap["radius"] for cap in caps) for i in range(3)]}
+    if len(caps) <= 256:
+        item["capsules"] = caps
+    else:
+        # Preserve the entire envelope as a conservative box when the reused
+        # router's per-obstacle representation budget would be exceeded.
+        item["geometry_note"] = "Conservative whole-span box because detailed fitting reservations exceed the bounded router capsule budget"
+    return item
 
 
 def _system_type(network, span):
@@ -98,22 +110,36 @@ def _system_type(network, span):
     if not value:
         systems = network.get("systems", [])
         value = next((s.get("type",s.get("system_type")) for s in systems if s.get("id")==span["system_id"]), None)
-    return value
+    return value if value in ("pressurized", "gravity", "drainage", "vent") else None
 
 
-def _solve_span(network, span, cancelled):
+def _solve_span(network, span, cancelled, *, released_ids=(), bend_penalty=150.):
     obstacles = deepcopy(network["obstacles"])
     for other in network["spans"]:
-        if other["id"] != span["id"]:
+        if other["id"] != span["id"] and other["id"] not in released_ids:
             item = _neighbor_obstacle(other, span, network)
             if item:
                 obstacles.append(item)
+    for node in network["nodes"]:
+        if node["type"] not in ("valve", "tee", "junction", "fitting") or node["id"] in (span["from_node"], span["to_node"]):
+            continue
+        radii = [node.get("dimensions", {}).get("body_radius_mm"), (node.get("fitting_catalog") or {}).get("body_radius_mm")]
+        known = [r for r in radii if isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and r > 0]
+        if not known:
+            continue
+        radius, center = max(known), node["position"]
+        obstacles.append({"id": f"network-node:{node['id']}", "min": [p-radius for p in center], "max": [p+radius for p in center],
+                          "capsules": [{"start": list(center), "end": list(center), "radius": radius}],
+                          "geometry_note": "Explicit finite nonincident component body; missing component dimensions are not inferred"})
+    from .core import MAX_OBSTACLES
+    if len(obstacles) > MAX_OBSTACLES:
+        return None, {"reason": "Combined supplied environment, pipe and component envelopes exceed the bounded router obstacle budget; select a smaller affected environment", "bounded_search": True, "obstacle_count": len(obstacles), "max_obstacles": MAX_OBSTACLES}, False
     clearance = float(requirement("clearance.shock")["value"])
     # Extra fitting body allowance helps the route search find buildable
     # alternatives. The separate validator checks actual swept fitting arcs.
-    catalog = span.get("fitting_catalog", {})
-    body = max(0., catalog.get("body_radius_mm", span["outer_diameter_mm"]/2.)-span["outer_diameter_mm"]/2.)
-    rules = {"clearance":clearance+body, "grid_step":network.get("search",{}).get("grid_step_mm",500.),"bend_penalty":150.}
+    catalog = span.get("fitting_catalog") or {}
+    body = max(0., (catalog.get("body_radius_mm") or span["outer_diameter_mm"]/2.)-span["outer_diameter_mm"]/2.)
+    rules = {"clearance":clearance+body, "grid_step":network.get("search",{}).get("grid_step_mm",500.),"bend_penalty":bend_penalty}
     if catalog.get("radius_mm"):
         rules["bend_radius"] = catalog["radius_mm"]
     kind = _system_type(network,span)
@@ -207,14 +233,14 @@ def _solve_span(network, span, cancelled):
     return combined,explanation,False
 
 
-def _node_variants(network):
+def _node_variants(network, selected_ids=None):
     yield deepcopy(network), None
     movable = []
     for node in network["nodes"]:
         if node["fixed"] or not node.get("movement_region"):
             continue
         incident = [s for s in network["spans"] if node["id"] in (s["from_node"],s["to_node"])]
-        if any(not s["modifiable"] for s in incident):
+        if any(not s["modifiable"] or s.get("constraints",{}).get("preserve_existing") or selected_ids is not None and s["id"] not in selected_ids for s in incident):
             continue
         region = node["movement_region"]
         options = node.get("allowed_positions") or [[(a+b)/2 for a,b in zip(region["min"],region["max"])]]
@@ -246,90 +272,199 @@ def _node_variants(network):
                 yield variant,sorted(moved)
 
 
-def optimize_network(raw, *, max_evaluations=24, cancelled=None):
+def resolve_selection(network, selected_span_ids=None, selected_system_ids=None):
+    """Resolve explicit span/system union without changing source permissions."""
+    known_spans = {s["id"] for s in network["spans"]}
+    known_systems = {s["system_id"] for s in network["spans"]}
+    for value, known, label in ((selected_span_ids, known_spans, "selected_span_ids"), (selected_system_ids, known_systems, "selected_system_ids")):
+        if value is not None and (not isinstance(value, list) or not 1 <= len(value) <= 128 or any(not isinstance(i, str) or i not in known for i in value) or len(set(value)) != len(value)):
+            raise ValueError(f"{label} must be a nonempty bounded list of unique known identifiers")
+    explicit = selected_span_ids is not None or selected_system_ids is not None
+    selected = set(selected_span_ids or []) | {s["id"] for s in network["spans"] if s["system_id"] in (selected_system_ids or [])}
+    if not explicit:
+        selected = known_spans
+    permitted = {s["id"] for s in network["spans"] if s["id"] in selected and s["modifiable"] and not s.get("constraints", {}).get("preserve_existing")}
+    return {"selected_span_ids": sorted(selected), "selected_system_ids": sorted({s["system_id"] for s in network["spans"] if s["id"] in selected}),
+            "modifiable_span_ids": sorted(permitted), "explicit": explicit,
+            "scope": "Selected permitted spans may change; all supplied systems and obstacles remain independently validated"}
+
+
+def _routing_orders(network, identifiers):
+    """Deterministic prioritized alternatives, bounded independently of n!."""
+    if not identifiers:
+        return [[]]
+    spans = {s["id"]: s for s in network["spans"]}
+    def priority(identifier):
+        span = spans[identifier]
+        radius = span["outer_diameter_mm"]/2 + float(requirement("clearance.shock")["value"])
+        low = [min(p[i] for p in span["points"])-radius for i in range(3)]
+        high = [max(p[i] for p in span["points"])+radius for i in range(3)]
+        conflicts = sum(all(low[i] <= o["max"][i] and high[i] >= o["min"][i] for i in range(3)) for o in network["obstacles"])
+        # Larger diameter and greater detour indicate more constrained routing.
+        direct = max(1., math.dist(span["points"][0], span["points"][-1]))
+        return (-conflicts, -span["outer_diameter_mm"], -_length(span["points"])/direct, identifier)
+    candidates = [list(identifiers), list(reversed(identifiers)), sorted(identifiers, key=priority)]
+    for offset in range(1, min(len(identifiers), 5)):
+        candidates.append(list(identifiers[offset:])+list(identifiers[:offset]))
+    unique = []
+    for order in candidates:
+        if order not in unique:
+            unique.append(order)
+    return unique[:8]
+
+
+def _candidate_plans(network, identifiers, selected_ids):
+    orders = _routing_orders(network, identifiers)
+    first = None
+    for variant, moved in _node_variants(network, selected_ids):
+        if first is None:
+            first = variant
+        # Retained-space passes preserve the established V4 behavior. Additional
+        # reservation passes can vacate still-unplanned selected routes, which
+        # breaks the circular blocking in independent single-pipe optimization.
+        for order in orders[:2]:
+            yield variant, moved, order, "retain_existing"
+        if len(identifiers) > 1:
+            for order in orders[:2]:
+                yield variant, moved, order, "prioritized_reservations"
+    if first is not None and len(identifiers) > 1:
+        for order in orders[2:]:
+            yield first, None, order, "prioritized_reservations"
+
+
+def _local_bend_penalty(config, before, span):
+    """Match the local additive length/turn search to normalized objectives."""
+    weights, scales = before["effective_objective_weights"], before["normalization_scales"]
+    per_mm, per_bend = weights["length"]/scales["length"], weights["bends"]/scales["bends"]
+    row = next((row for row in before["hydraulic_evidence"]["spans"] if row["span_id"] == span["id"]), {})
+    data = span.get("hydraulics", {})
+    if weights["hydraulic"] and row.get("status") == "ESTIMATED":
+        dynamic_pressure = data["density_kg_m3"]*row["velocity_m_s"]**2/2
+        hydraulic_weight = weights["hydraulic"]/scales["hydraulic"]
+        per_mm += hydraulic_weight*row["darcy_friction_factor"]*dynamic_pressure/data["inner_diameter_mm"]
+        per_bend += hydraulic_weight*data["bend_loss_coefficient"]*dynamic_pressure
+    # A finite cap protects numerical search; all full candidate objective
+    # terms, including modification/elevation, are recomputed independently.
+    return min(100000., per_bend/per_mm) if per_mm > 0 else 100000. if per_bend > 0 else 150.
+
+
+def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, objective_weights=None,
+                     max_seconds=None, selected_span_ids=None, selected_system_ids=None):
     from .network_validation import validate_network
+    from .network_fittings import fitting_envelopes
     started = time.perf_counter()
-    if isinstance(max_evaluations,bool) or not isinstance(max_evaluations,int) or not 1 <= max_evaluations <= MAX_EVALUATIONS:
+    if isinstance(max_evaluations, bool) or not isinstance(max_evaluations, int) or not 1 <= max_evaluations <= MAX_EVALUATIONS:
         raise ValueError("max_evaluations must be an integer from 1 to 64")
     network = normalize_network(raw)
+    settings = network.get("search", {})
+    config = resolve_objective(strategy if strategy is not None else settings.get("strategy"), objective_weights if objective_weights is not None else settings.get("objective_weights"))
+    seconds = max_seconds if max_seconds is not None else settings.get("max_seconds", DEFAULT_SECONDS)
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or not 0 < seconds <= MAX_SECONDS:
+        raise ValueError("max_seconds must be finite, positive and at most 120")
+    selection = resolve_selection(network, selected_span_ids, selected_system_ids)
+    selected = set(selection["modifiable_span_ids"])
+    modifiable = [s["id"] for s in network["spans"] if s["id"] in selected]
     digest = network_digest(network)
-    original_validation = validate_network(network,reference=network)
-    before = metrics(network)
-    original_penalty = sum(c["status"]=="FAIL" and c.get("severity")=="preference" for c in original_validation["checks"])*25.
-    before["objective"] += original_penalty
-    best, best_validation, after = None,original_validation,before
-    attempts, evaluations, cache_hits = [],0,0
-    was_cancelled = False
-    blocked = any(c.get("status","unresolved")=="unresolved" for c in network.get("unresolved_connections",[]))
-    modifiable = [s["id"] for s in network["spans"] if s["modifiable"]]
-    # Unknown functional metadata cannot be guessed into pressure routing.
-    if any(not _system_type(network,s) for s in network["spans"] if s["modifiable"]):
+    original_validation = validate_network(network, reference=network, permitted_span_ids=selected)
+    score_options = {"strategy": config["strategy"], "objective_weights": config["weights"]}
+    before = metrics(network, reference=network, validation=original_validation, **score_options)
+    best, best_validation, after = None, original_validation, before
+    attempts, evaluations, cache_hits = [], 0, 0
+    was_cancelled, timed_out = False, False
+    deadline = started + seconds
+    def interrupted():
+        nonlocal was_cancelled, timed_out
+        if cancelled and cancelled():
+            was_cancelled = True
+        if time.perf_counter() >= deadline:
+            timed_out = True
+        return was_cancelled or timed_out
+    blocked = any(c.get("status", "unresolved") == "unresolved" for c in network.get("unresolved_connections", []))
+    if any(not _system_type(network, s) for s in network["spans"] if s["id"] in selected):
         blocked = True
-        attempts.append({"reason":"Confirm every affected span's system type before routing"})
-    if len(modifiable)>MAX_SEARCH_SPANS:
+        attempts.append({"reason": "Confirm every affected span's system type before routing"})
+    if len(modifiable) > MAX_SEARCH_SPANS:
         blocked = True
-        attempts.append({"reason":"Select an affected subnetwork with at most 16 modifiable spans; entire supplied network is still validated"})
+        attempts.append({"reason": "Select an affected subnetwork with at most 16 modifiable spans; entire supplied network is still validated"})
     if blocked:
-        attempts.append({"reason":"Unresolved connections or search budget prevent safe network modification"})
+        attempts.append({"reason": "Unresolved connections or search budget prevent safe network modification"})
     else:
-        orders = [modifiable]
-        if len(modifiable)>1: orders.append(list(reversed(modifiable)))
-        for variant,moved_node in _node_variants(network):
-            for order in orders:
-                if evaluations>=max_evaluations:
+        plans = _candidate_plans(network, modifiable, selected)
+        # In addition to cold prioritized passes, refine an accepted network with
+        # a bounded extra sweep; this can release space that was occupied by an
+        # earlier candidate. No intermediate route is accepted independently.
+        def all_plans():
+            yield from plans
+            if best is not None and len(modifiable) > 1:
+                for order in _routing_orders(best, modifiable)[:2]:
+                    yield best, None, order, "incumbent_reroute"
+        for variant, moved_node, order, mode in all_plans():
+            if evaluations >= max_evaluations or interrupted():
+                break
+            candidate = deepcopy(variant)
+            solves = []
+            for index, spanid in enumerate(order):
+                if interrupted():
                     break
-                if cancelled and cancelled():
-                    was_cancelled=True; break
-                candidate = deepcopy(variant)
-                solves = []
-                for spanid in order:
-                    if cancelled and cancelled():
-                        was_cancelled=True; break
-                    span = next(s for s in candidate["spans"] if s["id"]==spanid)
-                    # Designers can lock valid/approved sections independently.
-                    if span.get("constraints",{}).get("preserve_existing"):
-                        continue
-                    points,search,hit = _solve_span(candidate,span,cancelled)
-                    cache_hits += int(hit)
-                    solves.append({"span_id":spanid,"cache_hit":hit,**search})
-                    if points:
-                        span["points"] = points
-                if cancelled and cancelled():
-                    was_cancelled = True
-                if was_cancelled: break
-                evaluations += 1
-                try:
-                    validation = validate_network(candidate,reference=network)
-                except ValueError as error:
-                    attempts.append({"evaluation":evaluations,"moved_node_id":moved_node,"accepted":False,
-                                     "reason":"Candidate could not complete independent validation", "detail":str(error)})
-                    continue
-                score = metrics(candidate,reference=network)
-                score["objective"] += sum(c["status"]=="FAIL" and c.get("severity")=="preference" for c in validation["checks"])*25.
-                failures = validation["hard_failures"]
-                from .network_fittings import fitting_envelopes
-                missing_physical = any(issue["code"] in ("missing_fitting_radius","missing_fitting_body") for span in candidate["spans"] if span["points"]!=next(s for s in network["spans"] if s["id"]==span["id"])["points"] for issue in fitting_envelopes(span)["issues"])
-                uncovered_size = any(_bends(span["points"]) and bend_requirement(span.get("nominal_diameter_mm")) is None for span in candidate["spans"] if span["points"]!=next(s for s in network["spans"] if s["id"]==span["id"])["points"])
-                improvement = original_validation["hard_failures"]>0 or score["objective"]<before["objective"]-1e-6
-                accept = failures==0 and not missing_physical and not uncovered_size and improvement and (best is None or score["objective"]<after["objective"]-1e-6)
-                attempts.append({"evaluation":evaluations,"moved_node_id":moved_node,"order":order,
-                                 "objective":score["objective"],"hard_failures":failures,"missing_physical_fitting_geometry":missing_physical,"uncovered_nominal_size":bool(uncovered_size),"accepted":accept,"span_searches":solves})
-                if accept:
-                    best,best_validation,after = candidate,validation,score
-            if evaluations>=max_evaluations or was_cancelled: break
-    status = "CANCELLED" if was_cancelled else "IMPROVED" if best else "NO IMPROVEMENT FOUND" if original_validation["hard_failures"]==0 and not blocked else "NO FEASIBLE ROUTE FOUND"
+                span = next(s for s in candidate["spans"] if s["id"] == spanid)
+                bend_penalty = _local_bend_penalty(config, before, span)
+                released = set(order[index+1:]) if mode == "prioritized_reservations" else set()
+                points, search, hit = _solve_span(candidate, span, interrupted, released_ids=released, bend_penalty=bend_penalty)
+                cache_hits += int(hit)
+                solves.append({"span_id": spanid, "cache_hit": hit, "released_unplanned_span_ids": sorted(released), **search})
+                if points:
+                    span["points"] = points
+            if interrupted():
+                break
+            evaluations += 1
+            try:
+                validation = validate_network(candidate, reference=network, permitted_span_ids=selected)
+            except ValueError as error:
+                attempts.append({"evaluation": evaluations, "moved_node_id": moved_node, "accepted": False, "selected": False,
+                                 "reservation_mode": mode, "reason": "Candidate could not complete independent validation", "detail": str(error)})
+                continue
+            score = metrics(candidate, reference=network, validation=validation, **score_options)
+            failures = validation["hard_failures"]
+            reference_spans = {s["id"]: s for s in network["spans"]}
+            changed = [s for s in candidate["spans"] if s["points"] != reference_spans[s["id"]]["points"]]
+            missing_physical = any(issue["code"] in ("missing_fitting_radius", "missing_fitting_body") for span in changed for issue in fitting_envelopes(span)["issues"])
+            uncovered_size = any(_bends(span["points"]) and bend_requirement(span.get("nominal_diameter_mm")) is None for span in changed)
+            improvement = bool(changed) and (original_validation["hard_failures"] > 0 or score["objective"] < before["objective"]-1e-9)
+            accept = failures == 0 and not missing_physical and not uncovered_size and improvement and (best is None or score["objective"] < after["objective"]-1e-9)
+            candidate_digest = network_digest(candidate)
+            attempts.append({"evaluation": evaluations, "moved_node_id": moved_node, "order": list(order), "reservation_mode": mode,
+                             "objective": score["objective"], "metrics": score, "candidate_digest": candidate_digest,
+                             "changed_span_ids": [s["id"] for s in changed], "hard_failures": failures,
+                             "missing_physical_fitting_geometry": missing_physical, "uncovered_nominal_size": bool(uncovered_size),
+                             "accepted": accept, "selected": False, "span_searches": solves})
+            if accept:
+                best, best_validation, after = candidate, validation, score
+    status = "CANCELLED" if was_cancelled else "IMPROVED" if best else "NO IMPROVEMENT FOUND" if original_validation["hard_failures"] == 0 and not blocked else "NO FEASIBLE ROUTE FOUND"
     if was_cancelled:
-        best,best_validation,after = None,original_validation,before
-    changed = [s["id"] for s in best["spans"] if s["points"]!=next(o for o in network["spans"] if o["id"]==s["id"])["points"]] if best else []
-    notes = [c for c in best_validation["checks"] if c["status"] in ("FAIL","UNVERIFIED")]
-    return {"schema_version":"pipeforge.proposal/4.0","status":status,"proposal_id":hashlib.sha256((digest+json.dumps(best,sort_keys=True)).encode()).hexdigest()[:24],
-            "source_digest":digest,"source_revision":network["drawing"]["revision"],"source_drawing_id":network["drawing"]["id"],
-            "original_network":network,"proposed_network":best,"before":before,"after":after,
-            "original_validation":original_validation,"validation":best_validation,"changed_span_ids":changed,
-            "topology":graph_summary(best or network),"unresolved_issues":notes,
-            "release_status":"REVIEW REQUIRED" if best_validation.get("unverified",0) or best_validation["hard_failures"] else "DESIGNER REVIEW REQUIRED",
-            "explanation": "A whole-network checked coordinated proposal is available" if best else "Original preserved. No acceptable improvement was found within the stated search limits",
-            "search":{"evaluations":evaluations,"max_evaluations":max_evaluations,"max_modifiable_spans":MAX_SEARCH_SPANS,
-                      "cache_hits":cache_hits,"cache_capacity":CACHE_LIMIT,"cache_bytes_limit":CACHE_BYTES_LIMIT,"elapsed_seconds":time.perf_counter()-started,"attempts":attempts,
-                      "cancelled":was_cancelled,"method":"Existing team finite-grid router, coordinated span orders and bounded permitted node positions; independent whole-network acceptance",
-                      "limitations":["Bounded search is not a proof of global optimality or continuous infeasibility", "Valve moves sample declared allowed positions or permitted-space center", "No source CAD entities are modified"]}}
+        best, best_validation, after = None, original_validation, before
+    best_digest = network_digest(best) if best else None
+    selected_attempt = next((attempt for attempt in reversed(attempts) if best_digest and attempt.get("accepted") and attempt.get("candidate_digest") == best_digest), None)
+    if selected_attempt:
+        selected_attempt["selected"] = True
+    changed = [s["id"] for s in best["spans"] if s["points"] != next(o for o in network["spans"] if o["id"] == s["id"])["points"]] if best else []
+    notes = [c for c in best_validation["checks"] if c["status"] in ("FAIL", "UNVERIFIED")]
+    quality = "HEURISTICALLY IMPROVED" if best and original_validation["hard_failures"] == 0 else "FEASIBLE NOT PROVEN OPTIMAL" if best else "NO OPTIMALITY OR INFEASIBILITY PROOF"
+    reason = "A whole-network checked coordinated proposal is available" if best else "Original preserved. No acceptable improvement was found within the stated search limits"
+    if timed_out:
+        reason += "; the search time budget was reached"
+    if before["unverified_objective_terms"]:
+        reason += "; unavailable objective evidence was excluded explicitly: " + ", ".join(before["unverified_objective_terms"])
+    return {"schema_version": "pipeforge.proposal/4.0", "status": status, "proposal_id": hashlib.sha256((digest+json.dumps(best, sort_keys=True)).encode()).hexdigest()[:24],
+            "source_digest": digest, "source_revision": network["drawing"]["revision"], "source_drawing_id": network["drawing"]["id"],
+            "original_network": network, "proposed_network": best, "before": before, "after": after,
+            "original_validation": original_validation, "validation": best_validation, "changed_span_ids": changed,
+            "strategy": config["strategy"], "objective_config": config, "selection": selection, "optimization_quality": quality,
+            "topology": graph_summary(best or network), "unresolved_issues": notes,
+            "release_status": "REVIEW REQUIRED" if best_validation.get("unverified", 0) or best_validation["hard_failures"] else "DESIGNER REVIEW REQUIRED",
+            "explanation": reason,
+            "search": {"evaluations": evaluations, "max_evaluations": max_evaluations, "max_seconds": float(seconds), "time_budget_reached": timed_out,
+                       "evaluation_budget_reached": evaluations >= max_evaluations, "max_modifiable_spans": MAX_SEARCH_SPANS,
+                       "cache_hits": cache_hits, "cache_capacity": CACHE_LIMIT, "cache_bytes_limit": CACHE_BYTES_LIMIT,
+                       "elapsed_seconds": time.perf_counter()-started, "attempts": attempts, "cancelled": was_cancelled,
+                       "method": "Prioritized multi-system routing with bounded order exploration, temporary release of unplanned permitted runs, incumbent rerouting and independent whole-network acceptance",
+                       "limitations": ["Bounded search is not a proof of global optimality or continuous infeasibility", "Valve moves sample declared allowed positions or permitted-space center", "No source CAD entities are modified", "Time limits are cooperative; independent validation is completed before any candidate is accepted", "Hydraulic loss estimates require supplied fluid, flow, inner diameter, roughness and bend-loss evidence; no flow-distribution solve is performed"]}}

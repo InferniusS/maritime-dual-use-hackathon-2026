@@ -102,7 +102,7 @@
       "cad_handle": "SYN-FIRE-IN",
       "instance_path": [],
       "fixed": true,
-      "nominal_diameter_mm": 50,
+      "nominal_diameter_mm": 80,
       "dimensions": {
         "body_radius_mm": 200
       },
@@ -122,7 +122,7 @@
       "cad_handle": "SYN-FIRE-OUT",
       "instance_path": [],
       "fixed": true,
-      "nominal_diameter_mm": 50,
+      "nominal_diameter_mm": 80,
       "dimensions": {
         "body_radius_mm": 200
       },

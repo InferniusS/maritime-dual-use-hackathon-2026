@@ -1,0 +1,170 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "08-sealed-compartment",
+  "title": "08 · Sealed compartment",
+  "description": "An invented solid bulkhead fills the complete routing cross-section. Report the blocking measured constraints and bounded-search failure; do not claim a general continuous-space infeasibility proof.",
+  "units": "mm",
+  "provenance": "synthetic",
+  "drawing": {
+    "id": "SYNTHETIC-V5-08-SEALED-COMPARTMENT",
+    "revision": "synthetic-v5-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      1,
+      0,
+      0
+    ],
+    "athwartship": [
+      0,
+      1,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      8000,
+      6000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "cooling",
+      "type": "pressurized"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "pump",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-PUMP",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "cooler",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        7500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-COOLER",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    }
+  ],
+  "spans": [
+    {
+      "id": "supply",
+      "from_node": "pump",
+      "to_node": "cooler",
+      "system_id": "cooling",
+      "cad_handle": "SYN-SUPPLY",
+      "instance_path": [],
+      "points": [
+        [
+          500,
+          1500,
+          1500
+        ],
+        [
+          7500,
+          1500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "sealed-bulkhead",
+      "kind": "bulkhead",
+      "min": [
+        3500,
+        0,
+        0
+      ],
+      "max": [
+        4500,
+        6000,
+        4000
+      ],
+      "source_handle": "SYN-WALL"
+    }
+  ],
+  "compartments": [],
+  "supports": [],
+  "penetrations": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "All geometry is invented; coverage applies only to this synthetic scene."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "unresolved_connections": [],
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  },
+  "scenario": {
+    "number": 8,
+    "source": "Invented engineering demonstration geometry; no ship or confidential drawing source",
+    "scope": "Local CPU bounded heuristic; results must be calculated, never taken from fixture metadata"
+  }
+}

@@ -18,6 +18,10 @@ def check(result, identifier):
 
 def test_full_twenty_checks_have_explicit_status_and_evidence():
     value=network()
+    # This fixture claims engineering verification, so supply actual port axes
+    # and designer angular acceptance rather than infer them from appearance.
+    value["nodes"][0].update(port_direction=[1,0,0],constraints={"angular_tolerance_deg":0.1})
+    value["nodes"][1].update(port_direction=[-1,0,0],constraints={"angular_tolerance_deg":0.1})
     result=validate_network(value,reference=value)
     assert len({item["id"] for item in result["checks"]})>=20
     assert all(item["status"] in {"PASS","FAIL","UNVERIFIED","NOT_APPLICABLE"} for item in result["checks"])

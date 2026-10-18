@@ -331,7 +331,7 @@ def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
     if network.get("units") != "mm":
         raise ValueError("Manufacturing requires normalized millimetre geometry")
     limits = _limits()
-    all_pieces, all_fittings, checks = [], [], []
+    all_pieces, all_fittings, all_welds, checks = [], [], [], []
     output_point_count, input_weld_count = 0, 0
     for span in network.get("spans", []):
         span_id = span["id"]
@@ -345,6 +345,12 @@ def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
         if not existing and len(_angles(span["points"])) > limits["max_bends"]*piece_budget:
             _budget_error(f"bend count requires more than {piece_budget} pieces")
         primitives, fitting_result, physical_known = _physical_path(span)
+        impossible_fittings=[issue for issue in fitting_result["issues"] if not issue["code"].startswith("missing_")]
+        missing_fittings=[issue for issue in fitting_result["issues"] if issue["code"].startswith("missing_")]
+        checks.append(_check("manufacturing.fitting_geometry",
+                             "FAIL" if impossible_fittings else "UNVERIFIED" if missing_fittings else "PASS",
+                             "Physical fitting takeouts, supported angles and body dimensions must fit before manufacture",
+                             {"violations":impossible_fittings,"unverified":missing_fittings},[span_id]))
         fittings = deepcopy(fitting_result["fittings"])
         represented = {fitting["vertex_index"] for fitting in fittings}
         for corner in _angles(span["points"]):
@@ -427,6 +433,20 @@ def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
         checks.append(_check("manufacturing.bends", "FAIL" if maximum_bends > limits["max_bends"] else physical_status,
                              "Bend count evaluated per manufactured piece", {"max_bends": limits["max_bends"], "pieces": [{"piece_id": p["id"], "bend_count": p["bend_count"]} for p in pieces]}, [span_id]))
         source_welds = manufacturing.get("welds")
+        total = primitives[-1]["end_station_mm"] if primitives else 0
+        # Flatten independently located welds for CAD/Excel schedules. Missing
+        # or invalid physical geometry never produces invented coordinates.
+        source_stations=[float(weld["station_mm"]) for weld in source_welds or []]+mapped_welds
+        proposed_stations=[] if existing else [station for station in cuts[1:-1]
+                                              if not any(abs(station-known)<=_EPS for known in source_stations)]
+        for index,(station,kind) in enumerate([(station,"supplied") for station in source_stations]+
+                                            [(station,"proposed") for station in proposed_stations],1):
+            mapped=bool(primitives) and physical_known and -_EPS<=station<=total+_EPS
+            all_welds.append({"id":f"{span_id}:weld:{index}","span_id":span_id,
+                              "system_id":span.get("system_id"),"cad_handle":span.get("cad_handle"),
+                              "station_mm":station,"position":_point_at_station(primitives,station) if mapped else None,
+                              "status":kind,"verification_status":"PASS" if mapped else "UNVERIFIED",
+                              "verification_scope":"Developed-station coordinate only; spacing and process are separate checks"})
         if source_welds is None and not (existing and all_mapped and all("welds" in piece for piece in pieces)):
             checks.append(_check("manufacturing.weld_spacing", "UNVERIFIED", "Existing weld positions are absent; proposed cut spacing is not proof of existing weld compliance", {"minimum_mm": limits["min_weld_spacing_mm"], "proposed_cut_stations_mm": cuts[1:-1], "proposed_cut_spacing_mm": [b-a for a,b in zip(cuts[1:-1], cuts[2:-1])]}, [span_id]))
         else:
@@ -463,5 +483,5 @@ def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
         else:
             checks.append(_check("manufacturing.planarity", "NOT_APPLICABLE" if manufacturing.get("planarity_required") is False else "UNVERIFIED", "Planarity requirement not specified" if "planarity_required" not in manufacturing else "No planarity requirement declared for these pieces", {}, [span_id]))
         checks.append(_check("manufacturing.process", "PASS" if manufacturing.get("process_verified") is True and fitting_result.get("catalog_verified") else "UNVERIFIED", "Material, fabrication process and approved fitting catalog must be confirmed independently", {"process_verified": manufacturing.get("process_verified", False), "catalog_verified": fitting_result.get("catalog_verified", False)}, [span_id]))
-    return {"pieces": all_pieces, "fittings": all_fittings, "checks": checks, "limits": limits,
+    return {"pieces": all_pieces, "fittings": all_fittings, "welds": all_welds, "checks": checks, "limits": limits,
             "notes": ["Generated cuts are proposed fabrication boundaries. No industrial approval is inferred from geometric limits."]}

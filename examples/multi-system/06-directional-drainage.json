@@ -1,0 +1,271 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "06-directional-drainage",
+  "title": "06 · Connected drainage",
+  "description": "Three sloped spans share an explicitly declared junction. Rotated ship axes and one reverse-stored span require per-segment flow-directed pitch checks; no endpoint-only drainage approval.",
+  "units": "mm",
+  "provenance": "synthetic",
+  "drawing": {
+    "id": "SYNTHETIC-V5-06-DIRECTIONAL-DRAINAGE",
+    "revision": "synthetic-v5-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      0,
+      1,
+      0
+    ],
+    "athwartship": [
+      1,
+      0,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      8000,
+      6000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "drainage",
+      "type": "drainage"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "inlet-a",
+      "type": "equipment_port",
+      "system_id": "drainage",
+      "position": [
+        1000,
+        1000,
+        2200
+      ],
+      "cad_handle": "SYN-V5-DRAIN-INLET-A",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "inlet-b",
+      "type": "equipment_port",
+      "system_id": "drainage",
+      "position": [
+        3000,
+        3000,
+        2300
+      ],
+      "cad_handle": "SYN-V5-DRAIN-INLET-B",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "junction",
+      "type": "junction",
+      "system_id": "drainage",
+      "position": [
+        3000,
+        1000,
+        2100
+      ],
+      "cad_handle": "SYN-V5-DRAIN-JUNCTION",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "outlet",
+      "type": "equipment_port",
+      "system_id": "drainage",
+      "position": [
+        5000,
+        1000,
+        2000
+      ],
+      "cad_handle": "SYN-V5-DRAIN-OUTLET",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    }
+  ],
+  "spans": [
+    {
+      "id": "feed-a",
+      "from_node": "inlet-a",
+      "to_node": "junction",
+      "system_id": "drainage",
+      "cad_handle": "SYN-V5-DRAIN-FEED-A",
+      "instance_path": [],
+      "points": [
+        [
+          1000,
+          1000,
+          2200
+        ],
+        [
+          3000,
+          1000,
+          2100
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {},
+      "flow_direction": "from_to"
+    },
+    {
+      "id": "feed-b",
+      "from_node": "inlet-b",
+      "to_node": "junction",
+      "system_id": "drainage",
+      "cad_handle": "SYN-V5-DRAIN-FEED-B",
+      "instance_path": [],
+      "points": [
+        [
+          3000,
+          3000,
+          2300
+        ],
+        [
+          3000,
+          1000,
+          2100
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {},
+      "flow_direction": "from_to"
+    },
+    {
+      "id": "outlet-run",
+      "from_node": "outlet",
+      "to_node": "junction",
+      "system_id": "drainage",
+      "cad_handle": "SYN-V5-DRAIN-OUTLET-RUN",
+      "instance_path": [],
+      "points": [
+        [
+          5000,
+          1000,
+          2000
+        ],
+        [
+          3000,
+          1000,
+          2100
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {},
+      "flow_direction": "to_from"
+    }
+  ],
+  "obstacles": [],
+  "compartments": [],
+  "supports": [],
+  "penetrations": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "All geometry is invented; coverage applies only to this synthetic scene."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "unresolved_connections": [],
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  },
+  "scenario": {
+    "number": 6,
+    "source": "Invented engineering demonstration geometry; no ship or confidential drawing source",
+    "scope": "Local CPU bounded heuristic; results must be calculated, never taken from fixture metadata"
+  }
+}

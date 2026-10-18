@@ -190,7 +190,76 @@ def _system_type(network,span):
     return ""
 
 
-def _validate_network(network, reference=None):
+def _connection_checks(nodes, spans):
+    """Check engineering interfaces independently of mere graph adjacency.
+
+    A port direction points out of its component into the attached pipe. Size
+    changes need explicit per-span port dimensions on the supplied component;
+    an anonymous junction never implies a compatible reducer.
+    """
+    failures, unknown, measurements = [], [], []
+    direction_fail, direction_unknown, direction_rows = [], [], []
+    flow_fail, flow_unknown, flow_rows = [], [], []
+    for span in spans:
+        for endpoint in ("from_node", "to_node"):
+            node = nodes.get(span.get(endpoint))
+            if node is None:
+                continue
+            constraints = node.get("constraints", {})
+            port_sizes = constraints.get("port_nominal_diameters_mm", {})
+            required = port_sizes.get(span["id"], node.get("nominal_diameter_mm"))
+            actual = span.get("nominal_diameter_mm")
+            row = {"id": node["id"], "span_id": span["id"],
+                   "required_nominal_diameter_mm": required, "actual_nominal_diameter_mm": actual}
+            measurements.append(row)
+            if required is None or actual is None:
+                unknown.append({**row, "reason": "component port or pipe nominal size missing"})
+            elif abs(required-actual) > EPS:
+                failures.append({**row, "reason": "pipe and declared component port sizes are incompatible"})
+            required_outer = constraints.get("port_outer_diameters_mm", {}).get(span["id"])
+            if required_outer is not None and span.get("outer_diameter_mm") is not None and abs(required_outer-span["outer_diameter_mm"]) > EPS:
+                failures.append({**row, "required_outer_diameter_mm": required_outer,
+                                 "actual_outer_diameter_mm": span["outer_diameter_mm"],
+                                 "reason": "pipe outer diameter differs from the declared physical port"})
+            directions = constraints.get("port_directions", {})
+            expected = directions.get(span["id"], node.get("port_direction"))
+            if expected is not None or node.get("type") == "equipment_port":
+                tolerance = constraints.get("angular_tolerance_deg")
+                if expected is None or tolerance is None:
+                    direction_unknown.append({"id": node["id"], "span_id": span["id"],
+                                              "reason": "component outward port direction and angular tolerance required"})
+                else:
+                    points = span.get("points", [])
+                    delta = _sub(points[1], points[0]) if endpoint == "from_node" else _sub(points[-2], points[-1])
+                    norm, expected_norm = math.sqrt(_dot(delta, delta)), math.sqrt(_dot(expected, expected))
+                    if norm <= EPS or expected_norm <= EPS:
+                        direction_fail.append({"id": node["id"], "span_id": span["id"], "reason": "zero-length connection tangent or port direction"})
+                    else:
+                        angle = math.degrees(math.acos(max(-1., min(1., _dot(delta, expected)/(norm*expected_norm)))))
+                        row = {"id": node["id"], "span_id": span["id"], "angle_error_deg": angle,
+                               "allowed_angle_error_deg": tolerance, "expected_outward_direction": expected}
+                        direction_rows.append(row)
+                        if angle > tolerance+EPS:
+                            direction_fail.append(row)
+            permitted = constraints.get("permitted_flow_directions", {}).get(span["id"])
+            if permitted is not None:
+                flow = span.get("flow_direction", span.get("constraints", {}).get("flow_direction"))
+                if flow not in ("from_to", "to_from"):
+                    flow_unknown.append({"id": node["id"], "span_id": span["id"], "reason": "declared flow direction required at constrained port"})
+                else:
+                    actual_flow = "out_of_node" if (flow == "from_to") == (endpoint == "from_node") else "into_node"
+                    row = {"id": node["id"], "span_id": span["id"], "actual_flow": actual_flow, "required_flow": permitted}
+                    flow_rows.append(row)
+                    if actual_flow != permitted:
+                        flow_fail.append(row)
+    return [
+        _aggregate("network.connection_compatibility", failures, unknown, "Pipe-to-component nominal and supplied physical port compatibility", {"connections": measurements}),
+        _aggregate("connections.port_direction", direction_fail, direction_unknown, "Endpoint tangents against explicitly declared outward component directions", {"connections": direction_rows}, applicable=bool(direction_rows or direction_unknown or direction_fail)),
+        _aggregate("connections.flow_direction", flow_fail, flow_unknown, "Declared flow direction at constrained component ports", {"connections": flow_rows}, applicable=bool(flow_rows or flow_unknown)),
+    ]
+
+
+def _validate_network(network, reference=None, permitted_span_ids=None):
     """Return at least twenty explicit checks; all evidence uses global mm.
 
     A reference is necessary to certify preservation against source geometry.
@@ -238,6 +307,11 @@ def _validate_network(network, reference=None):
         adjacency[a].add(b);adjacency[b].add(a)
     for node in nodes.values():
         if not adjacency[node["id"]]: failures.append({"id":node["id"],"reason":"unconnected component"})
+        attached=[span["id"] for span in spans if node["id"] in (span.get("from_node"),span.get("to_node"))]
+        if len(attached) > 2 and node.get("type") not in ("tee","junction","system_boundary"):
+            ports=node.get("constraints",{}).get("port_nominal_diameters_mm",{})
+            if not all(identifier in ports for identifier in attached):
+                failures.append({"id":node["id"],"reason":"branch incidence requires a declared tee/junction or explicit component ports","connected_span_ids":attached})
     for item in network.get("unresolved_connections",[]):
         if item.get("status","unresolved")!="resolved": unknown.append({"id":item.get("id"),"reason":"designer connectivity decision required"})
     if reference:
@@ -249,20 +323,56 @@ def _validate_network(network, reference=None):
                 failures.append({"id":span["id"],"reason":"source connection/system/CAD identity changed"})
             if old and span.get("constraints",{}) != old.get("constraints",{}):
                 failures.append({"id":span["id"],"reason":"source engineering constraints changed"})
+            if old and span.get("manufacturing") != old.get("manufacturing"):
+                failures.append({"id":span["id"],"reason":"source fabrication/weld evidence changed inside proposal"})
             if old and old.get("modifiable") is False and span.get("points") != old.get("points"):
                 failures.append({"id":span["id"],"reason":"unmodifiable source span changed"})
         for node in nodes.values():
             old=reference_nodes.get(node["id"])
-            if old and any(node.get(key)!=old.get(key) for key in ("type","system_id","cad_handle","instance_path","source_instances","fixed","constraints","movement_region","allowed_positions")):
+            if old and any(node.get(key)!=old.get(key) for key in ("type","system_id","cad_handle","instance_path","source_instances","fixed","constraints","movement_region","allowed_positions","port_direction","fitting_catalog")):
                 failures.append({"id":node["id"],"reason":"source component identity or permitted movement changed"})
         if network.get("bounds") != reference.get("bounds"):
             failures.append({"id":network.get("id"),"reason":"permitted source volume changed"})
         if network.get("standards_overrides",{}) != reference.get("standards_overrides",{}):
             failures.append({"id":network.get("id"),"reason":"standards authority changed inside proposal"})
+        source_tolerance=float(reference.get("tolerance_mm",reference.get("connection_tolerance_mm",0.01)))
+        if tolerance!=source_tolerance:
+            failures.append({"id":network.get("id"),"reason":"source connection tolerance changed inside proposal",
+                             "source_tolerance_mm":source_tolerance,"actual_tolerance_mm":tolerance})
         for key in ("obstacles","compartments","coverage","supports","penetrations","systems","accessibility_coverage","unresolved_connections","standards_profile"):
             if network.get(key) != reference.get(key):
                 failures.append({"id":network.get("id"),"reason":"source engineering context changed inside proposal","field":key})
     checks.append(_aggregate("network.connectivity",failures,unknown,"Declared topology, graph incidence and endpoint agreement",{"node_count":len(nodes),"span_count":len(spans),"connection_tolerance_mm":tolerance}))
+    metadata_fail=[]
+    if reference:
+        fields=[key for key in set(network)|set(reference) if key not in ("nodes","spans") and network.get(key)!=reference.get(key)]
+        if fields:metadata_fail.append({"id":network.get("id"),"changed_fields":sorted(fields),"reason":"source network context changed"})
+        for items,source_items,geometry in ((spans,reference_spans,"points"),(list(nodes.values()),reference_nodes,"position")):
+            for item in items:
+                old=source_items.get(item["id"])
+                if old is None:continue
+                fields=[key for key in set(item)|set(old) if key!=geometry and item.get(key)!=old.get(key)]
+                if fields:metadata_fail.append({"id":item["id"],"changed_fields":sorted(fields),"reason":"source engineering/component metadata changed"})
+    checks.append(_aggregate("preservation.source_metadata",metadata_fail,
+                             [] if reference else [{"id":network.get("id"),"reason":"source snapshot required to verify all engineering metadata"}],
+                             "All source engineering metadata is immutable; only route points and permitted component positions may change"))
+    scope_fail=[]
+    if permitted_span_ids is not None:
+        for span in spans:
+            old=reference_spans.get(span["id"])
+            if old is not None and span["id"] not in permitted_span_ids and span.get("points")!=old.get("points"):
+                scope_fail.append({"id":span["id"],"reason":"unselected span geometry changed"})
+        for node in nodes.values():
+            old=reference_nodes.get(node["id"])
+            if old is None or node.get("position")==old.get("position"):continue
+            locked=[span["id"] for span in (reference or {}).get("spans",[]) if
+                    node["id"] in (span.get("from_node"),span.get("to_node")) and span["id"] not in permitted_span_ids]
+            if locked:scope_fail.append({"id":node["id"],"reason":"moved component touches unselected spans","unselected_span_ids":locked})
+    checks.append(_aggregate("preservation.optimization_scope",scope_fail,[],
+                             "Selected spans and all incident component movements are independently constrained",
+                             {"permitted_span_ids":sorted(permitted_span_ids) if permitted_span_ids is not None else None},
+                             applicable=permitted_span_ids is not None))
+    checks.extend(_connection_checks(nodes, spans))
     # 2. Fixed ports cannot be inferred as preserved without a source snapshot.
     failures,unknown=[],[]
     for node in nodes.values():
@@ -273,6 +383,20 @@ def _validate_network(network, reference=None):
             if error>tolerance: failures.append({"id":node["id"],"movement_mm":error})
         elif not reference: unknown.append({"id":node["id"],"reason":"source snapshot required for preservation comparison"})
     checks.append(_aggregate("preservation.fixed_ports",failures,unknown,"Fixed equipment connection preservation",applicable=any(node.get("fixed") or node.get("type")=="equipment_port" for node in nodes.values())))
+    failures,unknown,movement_rows=[],[],[]
+    movable=[node for node in nodes.values() if node.get("fixed") is False]
+    for node in movable:
+        region=node.get("movement_region")
+        allowed=node.get("allowed_positions") or []
+        row={"id":node["id"],"position":node["position"],"movement_region":region,"allowed_positions":allowed}
+        movement_rows.append(row)
+        if region is None and not allowed:
+            unknown.append({"id":node["id"],"reason":"designer-permitted component movement region or positions missing"})
+        if region is not None and not _inside(node["position"],region):
+            failures.append({**row,"reason":"component lies outside its designer-permitted movement region"})
+        if allowed and not any(_distance(node["position"],point)<=tolerance for point in allowed):
+            failures.append({**row,"reason":"component position is not an explicitly permitted location"})
+    checks.append(_aggregate("preservation.component_movement",failures,unknown,"All movable component types retain designer-permitted locations",{"components":movement_rows},applicable=bool(movable)))
     # 3. Required intermediate compartments must be intersected by route
     # centerlines; the enclosing hull separately validates physical occupancy.
     failures,unknown=[],[]
@@ -359,10 +483,21 @@ def _validate_network(network, reference=None):
     unknown_geometry=[{"id":span["id"],"reason":"physical outer diameter missing"} for span in spans if not span.get("outer_diameter_mm")]
     for node_id,envelope in component_envelopes.items():
         for span in spans:
-            if node_id in (span.get("from_node"),span.get("to_node")):continue
-            gap=_minimum_pair([envelope],occupancy[span["id"]])
+            capsules=occupancy[span["id"]]
+            if node_id in (span.get("from_node"),span.get("to_node")):
+                # Only the actual endpoint leg connects to the body. Excluding
+                # every primitive of an incident span hides returning legs and
+                # elbows that penetrate their own valve or junction.
+                endpoint_segments=set()
+                if node_id==span.get("from_node"):endpoint_segments.add(0)
+                if node_id==span.get("to_node"):endpoint_segments.add(len(span["points"])-2)
+                region=envelope["radius"]+(span.get("outer_diameter_mm") or 0)/2+clearance
+                capsules=[part for cap in capsules for part in (
+                    _outside_sphere(cap,envelope["start"],region)
+                    if cap["kind"]=="pipe" and cap.get("segment_index") in endpoint_segments else [cap])]
+            gap=_minimum_pair([envelope],capsules)
             minimum_pipe_gap=min(minimum_pipe_gap,gap)
-            row={"id":node_id,"other_id":span["id"],"surface_gap_mm":gap,"reason":"physical component body versus nonincident span"}
+            row={"id":node_id,"other_id":span["id"],"surface_gap_mm":gap,"reason":"physical component body versus pipe outside its endpoint contact leg"}
             if gap < -EPS:pair_collisions.append(row);fitting_collisions.append(row)
             if gap+EPS<clearance:pair_clearance.append(row)
     bodies=list(component_envelopes.values())
@@ -507,6 +642,20 @@ def _validate_network(network, reference=None):
         if catalog.get("status")!="verified" or not catalog.get("source"):
             component_catalog_unknown.append({"id":node["id"],"reason":"valve/junction component specification and catalog approval not verified"})
     checks.append(_aggregate("fittings.component_catalog",[],component_catalog_unknown,"Valve, tee and junction physical envelopes do not imply commercial catalog approval",applicable=bool(physical_nodes)))
+    availability_fail,availability_unknown,availability_rows=[],[],[]
+    required_components=[span for span in spans
+                         if any(corner_angle(a,b,c)>EPS for a,b,c in zip(span["points"],span["points"][1:],span["points"][2:]))]
+    component_nodes=[node for node in nodes.values() if node in physical_nodes or
+                     node.get("fitting_catalog") is not None or node.get("constraints",{}).get("requires_fitting") is True]
+    for component in required_components+component_nodes:
+        catalog=component.get("fitting_catalog") or {}
+        row={"id":component["id"],"available":catalog.get("available"),"source":catalog.get("source")}
+        availability_rows.append(row)
+        if catalog.get("available") is False:
+            availability_fail.append({**row,"reason":"required fitting explicitly unavailable in supplied component specification"})
+        elif catalog.get("available") is not True or catalog.get("status")!="verified" or not catalog.get("source"):
+            availability_unknown.append({**row,"reason":"required fitting availability and approved source not confirmed"})
+    checks.append(_aggregate("fittings.availability",availability_fail,availability_unknown,"Required component availability is independent of geometric fit",{"components":availability_rows},applicable=bool(availability_rows)))
     # 14-16 plus manufacturing planarity/cutbacks are computed independently
     # by the manufactured-piece helper (not whole-network length).
     from .network_manufacturing import manufacture_network
@@ -643,23 +792,31 @@ def _validate_network(network, reference=None):
     geometric_ids={"network.connectivity","collision.pipe_to_pipe","collision.pipe_to_duct","collision.pipe_to_structure","collision.fitting_envelopes","routing.permitted_bounds","environment.coverage"}
     geometric=all(item["status"] in ("PASS","NOT_APPLICABLE") for item in checks if item["id"] in geometric_ids)
     engineering=hard_failures==0 and not any(item["severity"]=="hard" and item["status"]=="UNVERIFIED" for item in checks)
-    manufacturing_checks=[item for item in checks if item["id"].startswith("manufacturing.") or item["id"].startswith("fittings.")]
+    manufacturing_checks=[item for item in checks if item["id"].startswith("manufacturing.") or item["id"].startswith("fittings.") or item["id"]=="network.connection_compatibility"]
     manufacturable=all(item["status"] in ("PASS","NOT_APPLICABLE") for item in manufacturing_checks)
     status="FAIL" if hard_failures else "UNVERIFIED" if unverified else "PASS"
     return {"status":status,"checks":checks,"hard_failures":hard_failures,"unverified":unverified,"preference_warnings":preference_failures,"geometrically_feasible":geometric,"engineering_constraint_feasible":engineering,"manufacturability_verified":manufacturable,"standards_profile":PROFILE_ID,"standards_authority":standards_profile()["authority"],"scope":"Supplied explicit topology and conservative geometry; no installation approval or industrial certification","manufacturing":manufacturing,"spatial_index":{"method":"conservative bounding-sphere cKDTree with exact narrowphase","possible_obstacle_pairs":obstacle_index.total_queries,"evaluated_obstacle_pairs":obstacle_index.candidate_pairs,"minimum_clearance_scope":"exact over supplied conservative envelopes; full scan retained for bounded source-contact exceptions"}}
 
 
-def validate_network(network, reference=None):
+def validate_network(network, reference=None, *, permitted_span_ids=None):
     """Validate independently within bounded physical-envelope/pair budgets.
 
     Budget exhaustion raises ValueError, never returns a partially checked PASS.
     Context-local counters keep simultaneous API validations independent.
     """
+    if permitted_span_ids is not None:
+        if reference is None:
+            raise ValueError("An optimization scope requires the original reference network")
+        if not isinstance(permitted_span_ids,(list,tuple,set,frozenset)) or len(permitted_span_ids)>128 or any(not isinstance(item,str) for item in permitted_span_ids):
+            raise ValueError("permitted_span_ids must be a bounded list or set of existing span identifiers")
+        permitted_span_ids=set(permitted_span_ids)
+        if permitted_span_ids-{item["id"] for item in reference.get("spans",[])}:
+            raise ValueError("Optimization scope names unknown source spans")
     primitives=_preflight(network)
     counter=[0]
     token=_WORK_BUDGET.set(counter)
     try:
-        result=_validate_network(network,reference)
+        result=_validate_network(network,reference,permitted_span_ids)
         result["work_budget"]={"physical_primitives":primitives,"max_physical_primitives":MAX_PHYSICAL_PRIMITIVES,"narrowphase_pairs":counter[0],"max_narrowphase_pairs":MAX_NARROWPHASE_PAIRS}
         return result
     finally:

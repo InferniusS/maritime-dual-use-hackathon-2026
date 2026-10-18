@@ -31,6 +31,7 @@ public sealed partial class PreviewCommand
     {
         private readonly string session = Guid.NewGuid().ToString("N");
         private long generation;
+        public NetworkSourceBinding? SourceBinding { get; set; }
         public NetworkRevision(Database database)
         {
             database.ObjectAppended += (_, _) => System.Threading.Interlocked.Increment(ref generation);
@@ -81,6 +82,8 @@ public sealed partial class PreviewCommand
             }
             var units = AskUnits(editor);
             if (units is null) return;
+            if (!AskNumber(editor, "Endpoint review tolerance in mm (maximum 25; never establishes connectivity)", 1, false, out var tolerance)
+                || tolerance > 25) throw new InvalidOperationException("Endpoint review tolerance must be greater than zero and at most 25 mm.");
             editor.WriteMessage("\nDeclare the permitted routing volume explicitly in global WCS millimetres. Extracted drawing extents are not permission to route.");
             var minimum = AskNetworkCoordinate(editor, "Minimum permitted bound");
             if (minimum is null) return;
@@ -118,11 +121,12 @@ public sealed partial class PreviewCommand
             });
             var response = PostJson(client, "/api/network/inspect", new
             {
-                cad_id = Text(inspection, "cad_id"), tolerance_mm = 1.0, drawing, selected_handles = handles, bounds,
+                cad_id = Text(inspection, "cad_id"), tolerance_mm = tolerance, drawing, selected_handles = handles, bounds,
                 coordinate_system = coordinateSystem
             });
             var network = response["network"] as JsonObject ?? throw new InvalidOperationException("No connected network was returned.");
-            VerifyNetworkSource(document, network);
+            VerifyNetworkSource(document, network, requireGeometryBinding: false);
+            tracker.SourceBinding = new NetworkSourceBinding(network);
             File.WriteAllText(output.StringResult, network.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
             var unresolved = (network["unresolved_connections"] as JsonArray)?.Count ?? 0;
             editor.WriteMessage($"\nSaved {output.StringResult}. Network has {(network["spans"] as JsonArray)?.Count ?? 0} spans and {unresolved} unresolved connection(s).");
@@ -246,8 +250,10 @@ public sealed partial class PreviewCommand
         catch (System.Exception exception) { editor.WriteMessage($"\nPipeForge network review stopped: {exception.Message}"); }
     }
 
-    private static void VerifyNetworkSource(Document document, JsonObject network)
+    private static void VerifyNetworkSource(Document document, JsonObject network, bool requireGeometryBinding = true)
     {
+        if (AcApplication.DocumentManager.MdiActiveDocument != document)
+            throw new InvalidOperationException("The active drawing changed. Reactivate and inspect the source drawing before continuing.");
         if (Text(network, "schema_version") != "pipeforge.network/4.0" || Text(network, "units") != "mm")
             throw new InvalidOperationException("Expected a PipeForge 4.0 network in global WCS millimetres.");
         if (Text(network["coordinate_system"]!, "frame") != "WCS")
@@ -255,9 +261,15 @@ public sealed partial class PreviewCommand
         var drawing = network["drawing"] as JsonObject ?? throw new InvalidOperationException("No source drawing identity.");
         if (Text(drawing, "id") != document.Database.FingerprintGuid.ToString())
             throw new InvalidOperationException("This bundle belongs to a different drawing.");
-        var current = NetworkRevisions.GetValue(document.Database, database => new NetworkRevision(database)).Token;
-        if (Text(drawing, "revision") != current)
+        var tracker = NetworkRevisions.GetValue(document.Database, database => new NetworkRevision(database));
+        if (Text(drawing, "revision") != tracker.Token)
             throw new InvalidOperationException("The source drawing changed or reopened. Inspect it again; stale proposals cannot be reviewed or saved.");
+        if (requireGeometryBinding)
+        {
+            if (tracker.SourceBinding is null)
+                throw new InvalidOperationException("No source geometry was inspected in this drawing session. Run PIPEFORGENETWORK again.");
+            tracker.SourceBinding.Verify(network);
+        }
         using var transaction = document.Database.TransactionManager.StartTransaction();
         foreach (var collection in new[] { "nodes", "spans" })
         {
@@ -325,7 +337,7 @@ public sealed partial class PreviewCommand
     }
 
     private static void ShowNetworkOverlay(Document document, JsonObject original, JsonObject? proposal,
-        JsonObject validation, JsonObject result)
+        JsonObject validation, JsonObject result, bool allowKeep = true)
     {
         var units = original["drawing"]?["source_units"]?.GetValue<string>()
             ?? throw new InvalidOperationException("Native review requires the original drawing's source_units.");
@@ -348,7 +360,11 @@ public sealed partial class PreviewCommand
             foreach (var component in ((JsonArray)original["nodes"]!).Concat((JsonArray)original["spans"]!))
             {
                 if (component is null || !failedIds.Contains(Text(component, "id"))) continue;
-                var handle = component["cad_handle"]?.GetValue<string>();
+                // Nested geometry lives in a block definition; highlight its
+                // visible outer placement instead of an invisible definition entity.
+                var handle = component["instance_path"] is JsonArray placement && placement.Count > 0
+                    ? placement[0]?.GetValue<string>()?.Split('[')[0]
+                    : component["cad_handle"]?.GetValue<string>();
                 if (handle is null) continue;
                 if (!long.TryParse(handle, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var number)) continue;
                 var id = document.Database.GetObjectId(false, new Handle(number), 0);
@@ -359,7 +375,9 @@ public sealed partial class PreviewCommand
                 }
             }
             document.Editor.Regen();
-            var save = AskKeyword(document.Editor, "Keep separate review centerlines, or clear temporary preview", ["Clear", "Keep"], "Clear");
+            var save = allowKeep
+                ? AskKeyword(document.Editor, "Keep separate review centerlines, or clear temporary preview", ["Clear", "Keep"], "Clear")
+                : AskKeyword(document.Editor, "Clear this temporary preview after inspection", ["Clear"], "Clear");
             keep = save == "Keep";
         }
         finally
@@ -403,6 +421,8 @@ public sealed partial class PreviewCommand
     private static void SaveNetworkReview(Document document, JsonObject original, JsonObject? proposal,
         JsonObject result, double scale)
     {
+        // Do not rely on an earlier preview check: an intervening edit invalidates approval.
+        VerifyNetworkSource(document, original);
         using var transaction = document.Database.TransactionManager.StartTransaction();
         var layers = (LayerTable)transaction.GetObject(document.Database.LayerTableId, OpenMode.ForRead);
         var blocks = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
@@ -444,6 +464,8 @@ public sealed partial class PreviewCommand
                 var metadata = new JsonObject
                 {
                     ["span_id"] = span["id"]?.DeepClone(), ["cad_handle"] = span["cad_handle"]?.DeepClone(),
+                    ["system_id"] = span["system_id"]?.DeepClone(), ["pipe_id"] = span["pipe_id"]?.DeepClone(),
+                    ["from_node"] = span["from_node"]?.DeepClone(), ["to_node"] = span["to_node"]?.DeepClone(),
                     ["instance_path"] = span["instance_path"]?.DeepClone(), ["source_instances"] = span["source_instances"]?.DeepClone(),
                     ["source_revision"] = result["source_revision"]?.DeepClone(), ["source_digest"] = result["source_digest"]?.DeepClone(),
                     ["proposal_id"] = result["proposal_id"]?.DeepClone(), ["review_only"] = true

@@ -48,7 +48,7 @@ The plugin and companion use the service on `http://127.0.0.1:8767` on the same 
 2. Enter `NETLOAD` and select the newly built DLL from `bin/Release/net10.0-windows`.
 3. Run `MARITIMEPREVIEW` on a simple line. Confirm a temporary overlay appears and clears.
 4. Use `MARITIMEOPTIMIZE` with a synthetic line/polyline route and a synthetic obstacle box. Inspect the original/proposed comparison. Saving a suggestion adds a separate review centerline; it does not replace the source assembly.
-5. Follow the full [connected-network acceptance checklist](../docs/edge/AUTOCAD_4.md) before using new commands on authorized project data.
+5. Follow the [5.0 native workflow and acceptance checklist](../docs/edge/AUTOCAD_5.md) before using new commands on authorized project data. The earlier [4.0 checklist](../docs/edge/AUTOCAD_4.md) remains applicable to the existing handoff and review commands.
 
 Use a trusted project folder while retaining normal AutoCAD security controls. Restart AutoCAD before loading a rebuilt assembly if an earlier version is already loaded.
 
@@ -62,11 +62,14 @@ Use a trusted project folder while retaining normal AutoCAD security controls. R
 | `MARITIMECONTEXT` | Load, inspect, or clear reviewed context for the active drawing session |
 | `PIPEFORGENETWORK` | Create an explicit selected-network handoff with source identity, revision, units, and declared routing bounds |
 | `PIPEFORGECONNECTIONS` | Review ambiguous endpoint connections explicitly |
+| `PIPEFORGEOPTIMIZE` | Optimize multiple traced pipes, selected systems, or the complete reviewed network; show cancellable progress, preview, and explicitly approve an instruction bundle |
 | `PIPEFORGEREVIEW` | Revalidate a reviewed result, inspect coordinates, and preview optional separate review overlays |
 
 `MARITIMECONTEXT` accepts a reviewed context object or a wrapper with `model_context` and optional `engineering`. The synthetic [context template](../examples/model-context-template.json) illustrates structure. `scripts/build_model_context.py` can inspect local aligned DXF exports when processing is authorized; it does not align drawings, infer allowed compartments, or certify coverage.
 
 Endpoint proximity alone does not establish engineering connectivity. The connected workflow needs reviewed system IDs, port identities, dimensions, ship axes, movement constraints, and fitting evidence. Missing information remains UNVERIFIED. Source edits invalidate older handoffs and results.
+
+`PIPEFORGEOPTIMIZE` consumes the reviewed handoff, keeps all declared pipes and obstacles in validation, and limits permitted modifications to the selected spans. It offers balanced, length, bends, hydraulic, minimal-modification, and feasibility strategies, plus candidate and time budgets. Hydraulic ranking needs supplied hydraulic metadata. Cancellation reaches the local engine; a cancelled job cannot be approved. Approval defaults to No, temporary previews default to Clear, and persistent review additions default to Discard. Export creates a fresh local bundle folder; it never replaces source solids. Source identity and the live drawing revision are checked again before preview, approval, download completion, and saving review entities. An immutable in-session extraction binding rejects edited original geometry even when a handoff copies its earlier snapshot hash and revision; reviewed metadata and explicit in-tolerance endpoint confirmations remain supported. Reopening requires fresh inspection.
 
 ## Output and remaining verification
 

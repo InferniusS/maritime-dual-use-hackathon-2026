@@ -32,9 +32,9 @@ def main():
         page.check('#approve')
         expect(page.locator('#export')).to_be_enabled()
         page.click('#export')
-        expect(page.locator('#downloads a')).to_have_count(6,timeout=30000)
+        expect(page.locator('#downloads a')).to_have_count(8,timeout=30000)
         assert any(link.endswith('.xlsx') for link in page.locator('#downloads a').evaluate_all('(nodes)=>nodes.map(n=>n.getAttribute("href"))'))
-        summary['already_good']={'status':page.locator('#outcome').inner_text(),'checks':page.locator('#checks .check').count(),'reviewed_exports':6}
+        summary['already_good']={'status':page.locator('#outcome').inner_text(),'checks':page.locator('#checks .check').count(),'reviewed_exports':8}
         # Editing source metadata invalidates any reviewed result on the page.
         page.get_by_text('Edit network and connection metadata',exact=True).click()
         original=json.loads(page.input_value('#network-json'))
@@ -61,7 +61,8 @@ def main():
         expect(page.locator('#connections .connection')).to_have_count(0)
         summary['explicit_topology_confirmation']=True
         page.select_option('#example','c-connected-branch');page.click('#load-example')
-        expect(page.locator('#network-name')).to_contain_text('c-connected-branch')
+        expect(page.locator('#network-name')).to_contain_text('Connected branch')
+        page.wait_for_function("JSON.parse(document.getElementById('network-json').value).id === 'c-connected-branch'")
         expect(page.locator('#optimize')).to_be_enabled()
         page.click('#optimize')
         expect(page.locator('#progress')).to_contain_text('Completed',timeout=120000)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import json
+import math
 from pathlib import Path
 import threading
 import time
@@ -15,7 +16,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_NETWORK_REQUEST_BYTES = 2 * 1024 * 1024
-EXPORT_NAMES = frozenset(("instructions.json", "instructions.md", "components.xlsx", "components.csv", "network-preview.dxf", "network-result.json"))
+EXPORT_NAMES = frozenset(("instructions.json", "instructions.md", "components.xlsx", "components.csv", "network-preview.dxf", "network-result.json", "coordinates.csv", "network-comparison.svg"))
 
 
 class NetworkRequestError(ValueError):
@@ -42,14 +43,18 @@ class NetworkWorkspace:
 
     def examples(self):
         result = []
-        for path in sorted((ROOT / "examples" / "connected").glob("*.json")):
+        for path in self._example_paths():
             data = json.loads(path.read_text(encoding="utf-8"))
-            result.append({"id": path.stem, "name": data.get("name", data.get("id", path.stem)), "description": data.get("description", "Synthetic connected engineering fixture")})
+            result.append({"id": path.stem, "name": data.get("name", data.get("title", data.get("id", path.stem))), "description": data.get("description", "Synthetic connected engineering fixture")})
         return result
+
+    @staticmethod
+    def _example_paths():
+        return sorted((ROOT / "examples" / "connected").glob("*.json")) + sorted((ROOT / "examples" / "multi-system").glob("*.json"))
 
     def example(self, identifier):
         # Match known stems rather than interpreting any client-controlled path.
-        for path in sorted((ROOT / "examples" / "connected").glob("*.json")):
+        for path in self._example_paths():
             if path.stem == identifier:
                 return json.loads(path.read_text(encoding="utf-8"))
         raise NetworkRequestError(404, "Unknown synthetic network")
@@ -93,7 +98,7 @@ class NetworkWorkspace:
             count += len(segments)
             spans.append({"id":span["id"], "cad_handle":span.get("cad_handle"), "segments":segments,
                           "fittings":[{key:value for key,value in item.items() if key != "capsules"} for item in fitting["fittings"]],
-                          "catalog_status":span.get("fitting_catalog",{}).get("status","missing"), "issues":fitting["issues"]})
+                          "catalog_status":(span.get("fitting_catalog") or {}).get("status","missing"), "issues":fitting["issues"]})
         return {"spans":spans,"complete":complete,"segment_count":count,
                 "scope":"Conservative validation capsules for declared pipe and fitting dimensions; no commercial-solid approval", 
                 "notes":[] if complete else ["Physical visualization truncated at 2000 occupancy segments; centerlines and full validation remain available"]}
@@ -113,6 +118,41 @@ class NetworkWorkspace:
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 64:
             raise NetworkRequestError(422, "max_evaluations must be an integer from 1 to 64")
         return value
+
+    @staticmethod
+    def _options(payload, network):
+        """Reject invalid jobs before occupying the single numerical worker.
+
+        Selection controls permitted modifications; the complete original
+        network remains the immutable source and the validation environment.
+        """
+        options = {}
+        settings = network.get("search", {})
+        strategies = {"length", "bends", "hydraulic", "minimal_modifications", "modification", "balanced", "feasibility"}
+        strategy = payload.get("strategy", settings.get("strategy", "balanced"))
+        if not isinstance(strategy, str) or strategy not in strategies:
+            raise NetworkRequestError(422, "Choose a supported network optimization strategy")
+        if "strategy" in payload:
+            options["strategy"] = payload["strategy"]
+        seconds = payload.get("max_seconds", settings.get("max_seconds", 30))
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or not 0 < seconds <= 120:
+            raise NetworkRequestError(422, "max_seconds must be finite, positive, and at most 120")
+        if "max_seconds" in payload:
+            options["max_seconds"] = seconds
+        for key, known in (("selected_span_ids", {s["id"] for s in network["spans"]}),
+                           ("selected_system_ids", {s["system_id"] for s in network["spans"]})):
+            if key not in payload:
+                continue
+            values = payload[key]
+            if not isinstance(values, list) or not 1 <= len(values) <= 128 or any(not isinstance(v, str) or v not in known for v in values) or len(set(values)) != len(values):
+                raise NetworkRequestError(422, key + " must contain distinct existing identifiers")
+            options[key] = list(values)
+        if "objective_weights" in payload or settings.get("objective_weights") is not None:
+            # The same deterministic objective parser serves HTTP and direct
+            # numerical callers, including unsupported/missing term evidence.
+            from pipe_router.network_objective import validate_weights
+            options["objective_weights"] = validate_weights(payload.get("objective_weights", settings.get("objective_weights")))
+        return options
 
     def _claim(self):
         with self.lock:
@@ -178,9 +218,10 @@ class NetworkWorkspace:
         if action == "optimize":
             from pipe_router.connected import optimize_network
             network, budget = self._network(payload), self._budget(payload)
+            options = self._options(payload, network)
             self._claim()
             try:
-                return self._remember(network, optimize_network(network, max_evaluations=budget))
+                return self._remember(network, optimize_network(network, max_evaluations=budget, **options))
             finally:
                 self._release()
         if action == "jobs":
@@ -202,6 +243,7 @@ class NetworkWorkspace:
     def start_job(self, payload):
         from pipe_router.connected import optimize_network
         network, budget = self._network(payload), self._budget(payload)
+        options = self._options(payload, network)
         self._claim()
         identifier = uuid.uuid4().hex
         job = {"id": identifier, "status": "queued", "created": time.monotonic(), "elapsed_seconds": 0, "_cancel": threading.Event(), "response": None, "error": None}
@@ -211,13 +253,24 @@ class NetworkWorkspace:
         def run():
             job["status"] = "running"
             started = time.perf_counter()
+            job["_started"] = started
             try:
-                result = optimize_network(network, max_evaluations=budget, cancelled=job["_cancel"].is_set)
+                result = optimize_network(network, max_evaluations=budget, cancelled=job["_cancel"].is_set, **options)
                 if job["_cancel"].is_set():
                     job["status"] = "cancelled"
                 else:
-                    job["response"] = self._remember(network, result)
-                    job["status"] = "complete"
+                    response = self._remember(network, result)
+                    # Cancellation can arrive while display geometry and the
+                    # review record are being prepared. Publish completion
+                    # atomically with cancel handling; never expose a token
+                    # from a calculation whose cancellation was accepted.
+                    with self.lock:
+                        if job["_cancel"].is_set():
+                            self.reviews.pop(response["review_token"], None)
+                            job["status"] = "cancelled"
+                        else:
+                            job["response"] = response
+                            job["status"] = "complete"
             except Exception as error:
                 # A response to the current local client may describe validation;
                 # no source geometry is written to logs or telemetry.
@@ -234,7 +287,10 @@ class NetworkWorkspace:
             job = self.jobs.get(identifier)
             if job is None:
                 raise NetworkRequestError(404, "Job not found")
-            return {key: value for key, value in job.items() if not key.startswith("_") and key != "created"}
+            response = {key: value for key, value in job.items() if not key.startswith("_") and key != "created"}
+            if job["status"] == "running" and "_started" in job:
+                response["elapsed_seconds"] = time.perf_counter() - job["_started"]
+            return response
 
     def review(self, payload):
         from pipe_router.connected import network_digest

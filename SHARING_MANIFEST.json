@@ -3,7 +3,7 @@
   "source_commit": "a267421136c32effe103f8d96e2706d632c24126",
   "source_main_commit": "227a61351f9d5a37a00c15ce457329709a01def9",
   "history": "Fresh root snapshot; no original repository history copied",
-  "runtime_source_policy": "Application Python, TypeScript, C# and JavaScript preserved byte-for-byte; only drawing-dependent test functions and documentation sanitized",
+  "runtime_source_policy": "Initial root 22ad50e preserved 79 runtime source files byte-for-byte; subsequent Edge 5 development extends that sanitized root without importing original main history",
   "excluded_paths": [
     "autocad-plugin/examples/line-test.dxf",
     "autocad-plugin/prebuilt/Maritime.AutoCAD.dll",
@@ -21,14 +21,16 @@
     "test_shared_results_and_cad_export_match_the_reproducible_demo"
   ],
   "confidential_assets_included": false,
-  "repository_visibility": "Must be verified before remote publication",
+  "repository_visibility": "Private confirmed by repository user in GitHub Settings; independent API access unavailable",
   "runtime_files_verified_byte_identical": 79,
   "sanitized_python_tests": {
     "passed": 971,
     "deselected": 0
   },
   "credential_review": "No actual credentials detected in source-only text audit; synthetic test placeholders retained",
-  "publication_status": "UNPUBLISHED_LOCAL_CANDIDATE_PENDING_REPOSITORY_PRIVACY_VERIFICATION",
+  "publication_status": "Initial sanitized root 22ad50e published to private collaboration branch pipeforge-edge-v4",
+  "update_policy": "Normal fast-forward commits and pushes only to pipeforge-edge-v4 after confidentiality and repository checks; never modify main or import its unsanitized ancestry",
+  "current_engineering_record": "docs/edge/V5_0.md",
   "sanitized_documentation": [
     "README.md",
     "autocad-plugin/README.md",

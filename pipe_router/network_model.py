@@ -37,6 +37,26 @@ def _records(value, label, maximum):
     return value
 
 
+def _normalize_catalog(record, label):
+    """Apply the same explicit catalog contract to pipes and fixed components."""
+    catalog = core._mapping(record, label)
+    source = catalog.get("source")
+    if source is not None and (not isinstance(source, str) or not source.strip() or len(source) > 2048):
+        raise ValueError("Catalog source must be a nonempty reference string")
+    for key in ("radius_mm", "body_radius_mm"):
+        if catalog.get(key) is not None:
+            catalog[key] = core._number(catalog[key], key, positive=True)
+    angles = catalog.get("angles_deg", [])
+    if not isinstance(angles, list) or len(angles) > 72 or any(not 0 < core._number(a, "catalog angle") < 180 for a in angles):
+        raise ValueError("Catalog angles must be positive turns below 180 degrees")
+    if catalog.get("status") not in (None, "verified", "provisional", "missing", "unverified"):
+        raise ValueError("Unknown catalog verification status")
+    for key in ("available", "cutback_allowed"):
+        if key in catalog and not isinstance(catalog[key], bool):
+            raise ValueError("Catalog " + key + " must be explicitly boolean")
+    return catalog
+
+
 def normalize_network(raw):
     """Validate resource bounds and normalize declared coordinate units to mm.
 
@@ -109,6 +129,11 @@ envelopes use ``units``. Missing engineering metadata remains missing.
             raise ValueError(f"Unsupported node type: {node.get('type')}")
         _identifier(node.get("system_id"), "node.system_id")
         node["position"] = point(node.get("position"), "node.position")
+        if "port_direction" in node:
+            direction = list(core._point(node["port_direction"], "node.port_direction"))
+            if math.sqrt(sum(v*v for v in direction)) < 1e-12:
+                raise ValueError("Port direction must be a nonzero WCS vector")
+            node["port_direction"] = direction
         fixed = node.setdefault("fixed", True)
         if not isinstance(fixed, bool):
             raise ValueError("node.fixed must be boolean")
@@ -132,12 +157,15 @@ envelopes use ``units``. Missing engineering metadata remains missing.
         for key in ("dimensions", "constraints"):
             core._mapping(node.setdefault(key, {}), f"node.{key}")
         dimensions(node["dimensions"], "node.dimensions")
+        tolerance = node["constraints"].get("angular_tolerance_deg")
+        if tolerance is not None and not 0 <= core._number(tolerance, "angular_tolerance_deg") <= 180:
+            raise ValueError("Port angular tolerance must be from 0 to 180 degrees")
         if "body_radius_mm" in node["dimensions"]:
             core._number(node["dimensions"]["body_radius_mm"], "node body_radius_mm", positive=True)
         if "stem_height_mm" in node:
             node["stem_height_mm"] = core._number(node["stem_height_mm"], "stem_height_mm")
         if node.get("fitting_catalog") is not None:
-            core._mapping(node["fitting_catalog"], "node.fitting_catalog")
+            _normalize_catalog(node["fitting_catalog"], "node.fitting_catalog")
         contact = node["constraints"].get("contact_radius_mm")
         if contact is not None and not 0 < core._number(contact, "contact_radius_mm") <= 1000:
             raise ValueError("Port contact radius must be positive and at most 1000 mm")
@@ -178,17 +206,17 @@ envelopes use ``units``. Missing engineering metadata remains missing.
         if span.get("system_type") is not None and span["system_type"] not in ("pressurized", "drainage", "vent", "gravity"):
             raise ValueError("Unknown system_type must be omitted and reviewed, not guessed")
         if span.get("fitting_catalog") is not None:
-            catalog = core._mapping(span["fitting_catalog"], "fitting_catalog")
-            if catalog.get("source") is not None and (not isinstance(catalog["source"],str) or not catalog["source"].strip() or len(catalog["source"])>2048):
-                raise ValueError("Catalog source must be a nonempty reference string")
-            for key in ("radius_mm", "body_radius_mm"):
-                if catalog.get(key) is not None:
-                    catalog[key] = core._number(catalog[key], key, positive=True)
-            angles = catalog.get("angles_deg", [])
-            if not isinstance(angles, list) or len(angles) > 72 or any(not 0 < core._number(a,"catalog angle") < 180 for a in angles):
-                raise ValueError("Catalog angles must be positive turns below 180 degrees")
-            if catalog.get("status") not in (None,"verified","provisional","missing","unverified"):
-                raise ValueError("Unknown catalog verification status")
+            _normalize_catalog(span["fitting_catalog"], "span.fitting_catalog")
+        if span.get("hydraulics") is not None:
+            hydraulic = core._mapping(span["hydraulics"], "span.hydraulics")
+            for key in ("inner_diameter_mm", "density_kg_m3", "dynamic_viscosity_pa_s"):
+                if key in hydraulic:
+                    hydraulic[key] = core._number(hydraulic[key], key, positive=True)
+            for key in ("volumetric_flow_m3_s", "roughness_mm", "bend_loss_coefficient"):
+                if key in hydraulic:
+                    hydraulic[key] = core._number(hydraulic[key], key)
+                    if hydraulic[key] < 0:
+                        raise ValueError("Hydraulic flow magnitude, roughness and loss coefficient cannot be negative")
         if span.get("manufacturing") is not None:
             manufacturing = core._mapping(span["manufacturing"], "manufacturing")
             for piece in _records(manufacturing.get("pieces",[]), "manufactured pieces", 256):
@@ -196,6 +224,26 @@ envelopes use ``units``. Missing engineering metadata remains missing.
                     piece["points"] = [point(p,"manufactured piece point") for p in piece["points"]]
     if total_points > MAX_POINTS:
         raise ValueError("Network exceeds the total 4096 point validation budget")
+    for node in nodes:
+        incident = {s["id"] for s in spans if node["id"] in (s["from_node"], s["to_node"])}
+        constraints = node["constraints"]
+        for field in ("port_directions", "port_nominal_diameters_mm", "port_outer_diameters_mm", "permitted_flow_directions"):
+            if field not in constraints:
+                continue
+            ports = core._mapping(constraints[field], "node.constraints." + field)
+            if any(identifier not in incident for identifier in ports):
+                raise ValueError("Per-span port metadata must reference an incident span")
+            for identifier, value in ports.items():
+                if field == "port_directions":
+                    vector = list(core._point(value, "port direction"))
+                    if math.sqrt(sum(v*v for v in vector)) < 1e-12:
+                        raise ValueError("Port direction must be nonzero")
+                    ports[identifier] = vector
+                elif field == "permitted_flow_directions":
+                    if value not in ("into_node", "out_of_node"):
+                        raise ValueError("Port flow permission must be into_node or out_of_node")
+                else:
+                    ports[identifier] = core._number(value, field, positive=True)
     total_capsules = 0
     for obstacle in _records(net.setdefault("obstacles", []), "obstacles", MAX_OBSTACLES):
         _identifier(obstacle.get("id"), "obstacle.id")
@@ -261,10 +309,19 @@ envelopes use ``units``. Missing engineering metadata remains missing.
     net.setdefault("coordinate_system", {})
     systems = net.get("systems", [])
     if isinstance(systems, dict):
+        if any(not isinstance(value, (str, dict)) for value in systems.values()):
+            raise ValueError("System declarations must be explicit type strings or objects")
         systems = [{"id": k, **({"type":v} if isinstance(v,str) else v)} for k,v in systems.items()]
         net["systems"] = systems
     for record in _records(systems, "systems", 128):
         _identifier(record.get("id"), "system.id")
+        for field in ("type", "system_type"):
+            if record.get(field) is not None and record[field] not in ("pressurized", "drainage", "vent", "gravity"):
+                raise ValueError("Unknown system function must be omitted and reviewed, not guessed into pressure routing")
+        if record.get("type") and record.get("system_type") and record["type"] != record["system_type"]:
+            raise ValueError("Conflicting system function declarations require designer review")
+    if len({record["id"] for record in systems}) != len(systems):
+        raise ValueError("Duplicate system declarations are ambiguous")
     search = core._mapping(net.setdefault("search", {}), "search")
     if "grid_step_mm" in search:
         search["grid_step_mm"] = core._number(search["grid_step_mm"], "grid_step_mm", positive=True)
@@ -312,6 +369,8 @@ Explicit confirmed port IDs may be supplied by a designer in candidate data.
     invalid_ids = {x.get("candidate_id") for x in inspected.get("invalid_candidates", [])}
     duplicate_ids = {x.get("candidate_id") for x in inspected.get("duplicate_candidates", []) if x.get("candidate_id") != x.get("retained_id")}
     for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise ValueError("CAD route candidates must be objects")
         cid = candidate.get("id")
         if cid in source_ids or cid in invalid_ids or cid in duplicate_ids:
             continue
@@ -335,11 +394,19 @@ Explicit confirmed port IDs may be supplied by a designer in candidate data.
                 raise ValueError("Confirmed port identity has inconsistent geometry or system")
             nodes.setdefault(nid, node)
             endpoint_ids.append(nid)
-        spans.append({"id": cid, "from_node": endpoint_ids[0], "to_node": endpoint_ids[1],
+        span = {"id": cid, "from_node": endpoint_ids[0], "to_node": endpoint_ids[1],
                       "system_id": system, "points": deepcopy(points), "outer_diameter_mm": candidate.get("geometric_diameter"),
                       "nominal_diameter_mm": candidate.get("nominal_diameter_mm"), "cad_handle": sources[0]["source_handle"],
                       "instance_path": sources[0].get("instance_path", []), "source_instances": deepcopy(sources),
-                      "modifiable": True, "constraints": {"metadata_unverified": True}})
+                      "modifiable": candidate.get("modifiable", True), "constraints": {"metadata_unverified": True}}
+        # Explicit designer-supplied semantics survive the CAD round trip.
+        # Geometry inference cannot supply these engineering facts itself.
+        for key in ("system_type", "flow_direction", "fitting_catalog", "manufacturing", "hydraulics", "engineering_metadata", "pipe_id"):
+            if key in candidate:
+                span[key] = deepcopy(candidate[key])
+        if "constraints" in candidate:
+            span["constraints"].update(deepcopy(core._mapping(candidate["constraints"], "candidate.constraints")))
+        spans.append(span)
     unresolved = []
     for junction in inspected.get("junctions", []):
         endpoint_ids = []
@@ -401,7 +468,9 @@ Explicit confirmed port IDs may be supplied by a designer in candidate data.
             coverage.setdefault("notes",[]).append("Unsupported and sample-only CAD geometry prevents complete clearance verification; reliable extracted bounds remain active obstacles")
     return normalize_network({"schema_version": SCHEMA, "id": cad.get("id", "cad-network"), "units": "mm", "provenance": "cad-derived",
         "drawing": drawing, "coordinate_system": deepcopy(cad.get("coordinate_system", {})), "bounds": bounds,
+        "source_snapshot_sha256": cad.get("source_sha256"),
         "nodes": list(nodes.values()), "spans": spans, "obstacles": obstacles,
+        "systems": deepcopy(cad.get("systems", [])),
         "coverage": coverage,
         "unresolved_connections": unresolved, "tolerance_mm": tolerance_mm})
 

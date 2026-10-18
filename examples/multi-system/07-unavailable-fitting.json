@@ -1,0 +1,164 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "07-unavailable-fitting",
+  "title": "07 · Unavailable fitting",
+  "description": "A structural conflict requires bends, but no fitting radius or envelope is supplied. Reject unbuildable or unresolved proposals and preserve the source; this case does not assert that a real catalog lacks suitable parts.",
+  "units": "mm",
+  "provenance": "synthetic",
+  "drawing": {
+    "id": "SYNTHETIC-V5-07-UNAVAILABLE-FITTING",
+    "revision": "synthetic-v5-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      1,
+      0,
+      0
+    ],
+    "athwartship": [
+      0,
+      1,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      8000,
+      6000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "cooling",
+      "type": "pressurized"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "pump",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-PUMP",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "cooler",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        7500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-COOLER",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    }
+  ],
+  "spans": [
+    {
+      "id": "supply",
+      "from_node": "pump",
+      "to_node": "cooler",
+      "system_id": "cooling",
+      "cad_handle": "SYN-SUPPLY",
+      "instance_path": [],
+      "points": [
+        [
+          500,
+          1500,
+          1500
+        ],
+        [
+          7500,
+          1500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "missing",
+        "source": "Synthetic negative case: no selected elbow catalog, radius or envelope is available"
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "structure-block",
+      "kind": "structure",
+      "min": [
+        3000,
+        1000,
+        1000
+      ],
+      "max": [
+        4000,
+        2000,
+        2000
+      ],
+      "source_handle": "SYN-BLOCK"
+    }
+  ],
+  "compartments": [],
+  "supports": [],
+  "penetrations": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "All geometry is invented; coverage applies only to this synthetic scene."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "unresolved_connections": [],
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  },
+  "scenario": {
+    "number": 7,
+    "source": "Invented engineering demonstration geometry; no ship or confidential drawing source",
+    "scope": "Local CPU bounded heuristic; results must be calculated, never taken from fixture metadata"
+  }
+}

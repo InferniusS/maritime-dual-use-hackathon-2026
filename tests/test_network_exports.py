@@ -37,7 +37,7 @@ def result_for(network, candidate=None):
 def test_bundle_contains_real_xlsx_exact_wcs_dxf_and_cad_identity(network,tmp_path):
     result = result_for(network)
     files = export_network(network,result,tmp_path)
-    assert set(files.values()) == {"instructions.json","instructions.md","components.xlsx","components.csv","network-preview.dxf","network-result.json"}
+    assert set(files.values()) == {"instructions.json","instructions.md","components.xlsx","components.csv","network-preview.dxf","network-result.json","network-comparison.svg","coordinates.csv"}
     assert all((tmp_path/name).is_file() for name in files.values())
     instructions=json.loads((tmp_path/files["instructions"]).read_text())
     span=instructions["spans"][0]
@@ -47,7 +47,7 @@ def test_bundle_contains_real_xlsx_exact_wcs_dxf_and_cad_identity(network,tmp_pa
     assert span["fixed_connections"][0]["position"] == [11000,22000,3000]
     assert instructions["native_apply_authorized"] is False
     workbook=load_workbook(tmp_path/files["xlsx"],data_only=True)
-    assert set(workbook.sheetnames) == {"Components","Coordinates","Manufacturing","Checks","Metadata"}
+    assert set(workbook.sheetnames) == {"Components","Coordinates","Manufacturing","Checks","Metadata","Baseline checks","Changes","Systems","Welds","Candidates","Installation"}
     coordinates=list(workbook["Coordinates"].iter_rows(min_row=2,values_only=True))
     assert coordinates[0][5:8] == (11000,22000,3000)
     assert coordinates[1][5:8] == (15000,22000,3000)

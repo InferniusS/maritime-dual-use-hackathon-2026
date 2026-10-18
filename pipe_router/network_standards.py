@@ -1,5 +1,6 @@
 """Versioned user-supplied challenge requirements; no certification is implied."""
 from functools import lru_cache
+from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -7,13 +8,18 @@ PROFILE_ID = "fincantieri-track2-user-transcription-v1"
 
 
 @lru_cache(maxsize=1)
-def standards_profile():
+def _profile_snapshot():
     return json.loads((Path(__file__).resolve().parents[1] / "standards" / f"{PROFILE_ID}.json").read_text())
+
+
+def standards_profile():
+    """Return an isolated record so callers cannot change validation authority."""
+    return deepcopy(_profile_snapshot())
 
 
 def requirement(identifier):
     """Return the central record including authority and interpretation status."""
-    return next(item for item in standards_profile()["requirements"] if item["id"] == identifier)
+    return deepcopy(next(item for item in _profile_snapshot()["requirements"] if item["id"] == identifier))
 
 
 def bend_requirement(nominal_diameter_mm):

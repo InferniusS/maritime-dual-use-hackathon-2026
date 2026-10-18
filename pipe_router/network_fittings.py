@@ -31,7 +31,7 @@ def fitting_envelopes(span):
     catalog = span.get("fitting_catalog") or {}
     radius = catalog.get("radius_mm")
     body = catalog.get("body_radius_mm")
-    catalog_verified = catalog.get("status") == "verified" and bool(catalog.get("source"))
+    catalog_verified = catalog.get("status") == "verified" and bool(catalog.get("source")) and catalog.get("available") is not False
     fittings, issues = [], []
     takeouts = [0.0]*len(points)
     for index in range(1, len(points)-1):
@@ -43,20 +43,23 @@ def fitting_envelopes(span):
         if turn >= 179.999:
             issues.append({"code":"reversal", "vertex_index":index, "angle_deg":turn})
             continue
-        if radius is None or not isinstance(radius, (int, float)) or not math.isfinite(radius) or radius <= 0:
+        if radius is None or not isinstance(radius, (int, float)) or isinstance(radius, bool) or not math.isfinite(radius) or radius <= 0:
             issues.append({"code":"missing_fitting_radius", "vertex_index":index})
             continue
-        if body is None or not isinstance(body, (int, float)) or not math.isfinite(body) or body <= 0:
+        if body is None or not isinstance(body, (int, float)) or isinstance(body, bool) or not math.isfinite(body) or body <= 0:
             issues.append({"code":"missing_fitting_body", "vertex_index":index})
             continue
         if outer is not None and body < outer/2:
             issues.append({"code":"fitting_body_smaller_than_pipe", "vertex_index":index, "body_radius_mm":body, "pipe_radius_mm":outer/2})
+        if catalog.get("available") is False:
+            issues.append({"code":"unavailable_catalog_fitting", "vertex_index":index, "source":catalog.get("source")})
         supported = catalog.get("angles_deg")
         # Cutback capability must be explicit. A 90-degree elbow does not imply
         # approval to manufacture every smaller turn.
         if not supported:
             issues.append({"code":"missing_catalog_angles", "vertex_index":index, "angle_deg":turn})
-        elif not any(abs(turn-value) <= 1e-5 for value in supported) and not catalog.get("cutback_allowed", False):
+        elif not any(abs(turn-value) <= 1e-5 for value in supported) and not (
+                catalog.get("cutback_allowed") is True and any(turn < value for value in supported)):
             issues.append({"code":"unsupported_catalog_angle", "vertex_index":index, "angle_deg":turn})
         u, v = _sub(b, a), _sub(c, b)
         u, v = _mul(u, 1/math.dist(a, b)), _mul(v, 1/math.dist(b, c))

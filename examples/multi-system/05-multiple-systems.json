@@ -1,0 +1,235 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "05-multiple-systems",
+  "title": "05 · Two interacting systems",
+  "description": "A cooling run conflicts with a locked firemain. Preserve the unselected system and its diameter while calculating a cross-system-safe alternative.",
+  "units": "mm",
+  "provenance": "synthetic",
+  "drawing": {
+    "id": "SYNTHETIC-V5-05-MULTIPLE-SYSTEMS",
+    "revision": "synthetic-v5-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      1,
+      0,
+      0
+    ],
+    "athwartship": [
+      0,
+      1,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      8000,
+      6000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "cooling",
+      "type": "pressurized"
+    },
+    {
+      "id": "firemain",
+      "type": "pressurized"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "pump",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-PUMP",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "cooler",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        7500,
+        1500,
+        1500
+      ],
+      "cad_handle": "SYN-COOLER",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "fire-in",
+      "type": "equipment_port",
+      "system_id": "firemain",
+      "position": [
+        3500,
+        500,
+        1500
+      ],
+      "cad_handle": "SYN-FIRE-IN",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 80,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "fire-out",
+      "type": "equipment_port",
+      "system_id": "firemain",
+      "position": [
+        3500,
+        5500,
+        1500
+      ],
+      "cad_handle": "SYN-FIRE-OUT",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 80,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    }
+  ],
+  "spans": [
+    {
+      "id": "supply",
+      "from_node": "pump",
+      "to_node": "cooler",
+      "system_id": "cooling",
+      "cad_handle": "SYN-SUPPLY",
+      "instance_path": [],
+      "points": [
+        [
+          500,
+          1500,
+          1500
+        ],
+        [
+          7500,
+          1500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "firemain",
+      "from_node": "fire-in",
+      "to_node": "fire-out",
+      "system_id": "firemain",
+      "cad_handle": "SYN-FIREMAIN",
+      "instance_path": [],
+      "points": [
+        [
+          3500,
+          500,
+          1500
+        ],
+        [
+          3500,
+          5500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": false,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 250,
+        "body_radius_mm": 55,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    }
+  ],
+  "obstacles": [],
+  "compartments": [],
+  "supports": [],
+  "penetrations": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "All geometry is invented; coverage applies only to this synthetic scene."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "unresolved_connections": [],
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  },
+  "scenario": {
+    "number": 5,
+    "source": "Invented engineering demonstration geometry; no ship or confidential drawing source",
+    "scope": "Local CPU bounded heuristic; results must be calculated, never taken from fixture metadata"
+  }
+}
