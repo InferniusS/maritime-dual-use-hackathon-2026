@@ -6,15 +6,15 @@
   "sdk_version": "10.0.402",
   "autodesk_reference_package": "AutoCAD.NET 26.0.0",
   "command": "dotnet build autocad-plugin/Maritime.AutoCAD.csproj -c Release -p:DebugType=None",
-  "dll_sha256": "89ab1099f782b8eee4c8544b3de9ac7a5a24fe68c1038e5b6fdbc2a6c04b2054",
+  "dll_sha256": "122c7500591139d085c1f5673d2dc61c2ad40aa25c657e9d01f48b0a4252971b",
   "source_sha256": {
     "autocad-plugin/Maritime.AutoCAD.csproj": "25934cc9a6fa53a3decbd00759bccd3ececf07e99a18123fb8c336c2351ed6b1",
-    "autocad-plugin/CadCommand.cs": "9d9a8c1b48b41aa879419430b2175d72b897c1cd3718cb3709d6e80503e1d67e",
+    "autocad-plugin/CadCommand.cs": "f43a7c2e2523f79c9adb906ebe5c998e4c23a107bb2606264fccf7bfcf9bd155",
     "autocad-plugin/PreviewCommand.cs": "a10f65cf9d5aab99961d20cfc65e4435bd3fe8538a6ad9dc6d7b990d12e8dded"
   },
   "build_warnings": 0,
   "build_errors": 0,
   "autocad_runtime_verified": false,
-  "runtime_check_needed": "Retry MARITIMECAD on the venue laptop with fresh HTTP connections. The previous build passed the simple line workflow and Save. The connection fix has been exercised outside AutoCAD on the Mac.",
+  "runtime_check_needed": "Retry MARITIMECAD on the venue laptop with the matching Python service. This build reports pipe envelope coverage. The real DB1 route and regression cases pass their implemented checks on the Mac. This DLL has built successfully but has not yet been run inside AutoCAD.",
   "bundled_autodesk_runtime_assemblies": false
 }

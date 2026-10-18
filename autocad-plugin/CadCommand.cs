@@ -116,14 +116,17 @@ public sealed partial class PreviewCommand
             VerifySnapshotContext(layout, metadata.fingerprint, snapshotHash);
             var original = ReadPoints(layout["pipe"]?["original_route"], "selected baseline");
             editor.WriteMessage($"\nSelected route has {original.Count} points. " +
-                $"The local check includes {(layout["obstacles"] as JsonArray)?.Count ?? 0} nearby obstacle boxes.");
+                $"The local check includes {(layout["obstacles"] as JsonArray)?.Count ?? 0} nearby components.");
+            if (layout["cad_context"]?["counts"] is JsonObject coverage)
+                editor.WriteMessage($"\nPipe-shaped envelopes: {coverage["pipe_shaped_obstacles"]}. " +
+                    $"Fallback boxes: {coverage["fallback_box_obstacles"]}.");
             if (!ShowComparedPreview(document, original.Select(p => Scale(p, scale)).ToList(), null,
                 "Cyan is the inferred route to be checked. Verify its start, end and included components.", false, null)) return;
 
             var contacts = layout["cad_context"]?["endpoint_contacts"] as JsonArray;
             if (contacts is { Count: > 0 })
             {
-                editor.WriteMessage("\nSome obstacle boxes touch the route ends. They may be connectors or actual collisions.");
+                editor.WriteMessage("\nSome component envelopes touch the route ends. They may be connectors or actual collisions.");
                 var connections = new Dictionary<string, List<string>>();
                 foreach (var contact in contacts)
                 {

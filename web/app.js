@@ -62,9 +62,104 @@ const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6]
 function mesh(vertices, triangles, name, color, opacity = .3) {
   return {type: 'mesh3d', x: vertices.map(p => p[0]), y: vertices.map(p => p[1]), z: vertices.map(p => p[2]), i: triangles.map(p => p[0]), j: triangles.map(p => p[1]), k: triangles.map(p => p[2]), name, color, opacity, hoverinfo: 'name', flatshading: false, showscale: false}
 }
+function clipMesh(vertices, triangles, low, high) {
+  const resultVertices = [], resultTriangles = []
+  for (const triangle of triangles) {
+    let polygon = triangle.map(index => vertices[index])
+    for (let axis=0; axis<3; axis++) {
+      for (const [boundary,direction] of [[low[axis],1],[high[axis],-1]]) {
+        if (!polygon.length) break
+        const clipped = []
+        let previous = polygon.at(-1), previousInside = direction*(previous[axis]-boundary) >= 0
+        for (const current of polygon) {
+          const currentInside = direction*(current[axis]-boundary) >= 0
+          if (currentInside !== previousInside) {
+            const fraction = (boundary-previous[axis])/(current[axis]-previous[axis])
+            const intersection = previous.map((value,k) => value + fraction*(current[k]-value))
+            intersection[axis] = boundary
+            clipped.push(intersection)
+          }
+          if (currentInside) clipped.push(current)
+          previous = current
+          previousInside = currentInside
+        }
+        polygon = clipped
+      }
+    }
+    if (polygon.length >= 3) {
+      const offset = resultVertices.length
+      resultVertices.push(...polygon)
+      for (let i=1; i<polygon.length-1; i++) resultTriangles.push([offset,offset+i,offset+i+1])
+    }
+  }
+  return {vertices: resultVertices, triangles: resultTriangles}
+}
+function capsuleMesh(capsules) {
+  const vertices = [], triangles = [], sides = 12, steps = 4
+  const cross = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
+  for (const capsule of capsules) {
+    const {start,end,radius} = capsule
+    const delta = end.map((v,k) => v-start[k]), length = Math.hypot(...delta)
+    const axis = length ? delta.map(v => v/length) : [0,0,1]
+    let u = cross(axis, Math.abs(axis[0]) < .9 ? [1,0,0] : [0,1,0])
+    const norm = Math.hypot(...u)
+    u = u.map(v => v/norm)
+    const v = cross(axis,u)
+    let capsuleVertices = [], capsuleTriangles = []
+    for (const [center,first] of [[start,-Math.PI/2],[end,0]]) {
+      for (let step=0; step<=steps; step++) {
+        const angle = first + step*Math.PI/(2*steps)
+        const axial = radius*Math.sin(angle), radial = radius*Math.cos(angle)
+        for (let j=0; j<sides; j++) {
+          const theta = 2*Math.PI*j/sides
+          capsuleVertices.push(center.map((coordinate,k) => coordinate + axial*axis[k] + radial*(u[k]*Math.cos(theta)+v[k]*Math.sin(theta))))
+        }
+      }
+    }
+    for (let row=0; row<2*(steps+1)-1; row++) {
+      for (let j=0; j<sides; j++) {
+        const a = row*sides+j, b = row*sides+(j+1)%sides
+        capsuleTriangles.push([a,b,a+sides],[b,b+sides,a+sides])
+      }
+    }
+    if (capsule.clip_min) {
+      const clipped = clipMesh(capsuleVertices,capsuleTriangles,capsule.clip_min,capsule.clip_max)
+      capsuleVertices = clipped.vertices
+      capsuleTriangles = clipped.triangles
+    }
+    const offset = vertices.length
+    vertices.push(...capsuleVertices)
+    for (const triangle of capsuleTriangles) triangles.push(triangle.map(index => offset+index))
+  }
+  return {vertices,triangles}
+}
+function geometryCoverage(input) {
+  const obstacles = input.obstacles || [], shaped = obstacles.filter(item => item.capsules?.length).length
+  let text = `${obstacles.length} nearby obstacle objects. ${shaped} use pipe-shaped envelopes. ${obstacles.length-shaped} use box envelopes.`
+  const counts = input.cad_context?.counts || {}
+  if (counts.solid_instances_without_extracted_geometry) text += ` ${counts.solid_instances_without_extracted_geometry} source solid instances have no extracted geometry.`
+  if (counts.explicit_curve_objects_unchecked) text += ` ${counts.explicit_curve_objects_unchecked} explicit curve objects are not collision obstacles.`
+  return text
+}
+function diagnosticText(item) {
+  const message = item.message || item.code || 'Review finding'
+  const details = []
+  if (item.stage) details.push(item.stage.replaceAll('_',' '))
+  if (item.source_handle) {
+    const escapedHandle = String(item.source_handle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const alreadyNamed = new RegExp('\\bsource\\s+' + escapedHandle + '(?![\\w-])','i').test(message)
+    const placement = (item.instance_path || []).join('/')
+    if (!alreadyNamed) details.push(`source ${item.source_handle}${placement ? ' in ' + placement : ''}`)
+    else if (placement && !message.includes(placement)) details.push(`instance ${placement}`)
+  }
+  if (item.obstacle && !message.includes(item.obstacle)) details.push(item.obstacle)
+  if (item.obstacle_method) details.push(item.obstacle_method.replaceAll('_',' '))
+  if (item.point) details.push(`point ${item.point.map(number).join(', ')} mm`)
+  return message + (details.length ? ` (${details.join(' · ')})` : '')
+}
 function plotLayout(key) {
   const axis = title => ({title: {text: title}, backgroundcolor: '#0b1726', gridcolor: '#263c53', zerolinecolor: '#3c546e', showbackground: true})
-  return {paper_bgcolor: '#101e30', plot_bgcolor: '#101e30', font: {color: '#c8d6e8', family: 'system-ui'}, margin: {l: 0, r: 0, t: 12, b: 0}, uirevision: key, legend: {orientation: 'h', x: .01, y: 1}, scene: {xaxis: axis('X · mm'), yaxis: axis('Y · mm'), zaxis: axis('Z · mm'), aspectmode: 'data', camera: {eye: {x: 1.4, y: 1.6, z: 1.1}}}}
+  return {paper_bgcolor: '#101e30', plot_bgcolor: '#101e30', font: {color: '#c8d6e8', family: 'system-ui'}, margin: {l: 0, r: 0, t: 12, b: 0}, uirevision: key, legend: {orientation: 'h', x: .01, y: 1, groupclick: 'togglegroup'}, scene: {xaxis: axis('X · mm'), yaxis: axis('Y · mm'), zaxis: axis('Z · mm'), aspectmode: 'data', camera: {eye: {x: 1.4, y: 1.6, z: 1.1}}}}
 }
 const plotConfig = {responsive: true, displaylogo: false, modeBarButtonsToRemove: ['sendDataToCloud', 'sendChartToCloud']}
 function normalizedPreview(input) {
@@ -78,6 +173,31 @@ function normalizedPreview(input) {
   copy.pipe.end = point(copy.pipe.end)
   copy.pipe.original_route = copy.pipe.original_route.map(point)
   for (const b of [copy.bounds, ...copy.obstacles]) {b.min = point(b.min); b.max = point(b.max)}
+  for (const obstacle of copy.obstacles) {
+    if (obstacle.capsules !== undefined) {
+      if (!Array.isArray(obstacle.capsules) || !obstacle.capsules.length) throw new Error('Pipe envelopes need at least one capsule')
+      for (const capsule of obstacle.capsules) {
+        capsule.start = point(capsule.start)
+        capsule.end = point(capsule.end)
+        if (!Number.isFinite(capsule.radius) || capsule.radius <= 0) throw new Error('Envelope radii must be positive numbers')
+        capsule.radius *= factor
+        if (capsule.clip_min !== undefined || capsule.clip_max !== undefined) {
+          capsule.clip_min = point(capsule.clip_min)
+          capsule.clip_max = point(capsule.clip_max)
+          if (capsule.clip_min.some((value,k) => value > capsule.clip_max[k])) throw new Error('Envelope clip bounds must be ordered')
+        }
+      }
+    }
+  }
+  for (const fixed of copy.protected_endpoints || []) {
+    fixed.points = fixed.points.map(point)
+    if (Number.isFinite(fixed.max_distance)) fixed.max_distance *= factor
+  }
+  copy.pipe.diameter *= factor
+  for (const key of ['clearance','grid_step','bend_penalty','bend_radius']) {
+    if (Number.isFinite(copy.rules?.[key])) copy.rules[key] *= factor
+  }
+  copy.units = 'mm'
   return copy
 }
 function drawRoute(input, result = null) {
@@ -85,20 +205,33 @@ function drawRoute(input, result = null) {
   const linked = Boolean(input.cad_context && routeDrawing)
   const traces = linked ? geometryTraces(routeDrawing, {context: true, candidate: routeCandidate}) : []
   if (!linked || $('show-obstacles').checked) {
-    const points = []
+    const shownGroups = new Set(), sources = new Map((input.cad_context?.obstacle_sources || []).map(item => [item.id,item]))
+    const escapeHover = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))
     for (const obstacle of input.obstacles) {
-      if (linked) {
+      const kind = obstacle.capsules?.length ? 'pipe-envelopes' : 'box-envelopes'
+      const source = sources.get(obstacle.id) || obstacle
+      let hover = escapeHover(obstacle.id)
+      if (source.source_handle) hover += '<br>Source ' + escapeHover(source.source_handle)
+      if (source.instance_path?.length) hover += '<br>Instance ' + escapeHover(source.instance_path.join('/'))
+      hover += '<br>Conservative envelope<extra></extra>'
+      const presentation = {legendgroup: kind, showlegend: !shownGroups.has(kind), hovertemplate: hover, meta: {obstacle_id: obstacle.id}}
+      shownGroups.add(kind)
+      if (obstacle.capsules?.length) {
+        const geometry = capsuleMesh(obstacle.capsules)
+        traces.push({...mesh(geometry.vertices, geometry.triangles, 'Pipe envelopes', '#99b8d0', linked ? .3 : .45), ...presentation})
+      } else if (linked) {
         const v = boxPoints(obstacle)
-        points.push(...edges.flatMap(([a,b]) => [v[a],v[b],null]))
-      } else traces.push(mesh(boxPoints(obstacle), faces, obstacle.name || obstacle.id || 'Obstacle', '#9faabd', .28))
+        traces.push({...line(edges.flatMap(([a,b]) => [v[a],v[b],null]), 'Box envelopes', '#e49b9b', 2), ...presentation})
+      } else traces.push({...mesh(boxPoints(obstacle), faces, 'Box envelopes', '#9faabd', .28), ...presentation})
     }
-    if (linked) traces.push(line(points, 'Checked obstacle boxes', '#e49b9b', 2))
   }
   const vertices = boxPoints(input.bounds)
   traces.push(line(edges.flatMap(([a,b]) => [vertices[a], vertices[b], null]), linked ? 'Assumed local test area' : 'Allowed box', '#60768e', 2))
   traces.push(line(result?.original.points || input.pipe.original_route, 'Original', '#ffb45e', 7))
   if (result?.candidate) traces.push(line(result.candidate.points, 'Suggested', '#55e1b9', 6))
   for (const fixed of input.protected_endpoints || []) traces.push(line(fixed.points, 'Fixed ' + fixed.endpoint + ' connection', '#ffd873', 9))
+  const stops = (result?.diagnostics || []).filter(item => Array.isArray(item.point) && item.point.length === 3 && item.point.every(Number.isFinite))
+  if (stops.length) traces.push({...line(stops.map(item => item.point), 'Search diagnostic points', '#ff7588'), mode: 'markers', marker: {color: '#ff7588', size: 7, symbol: 'diamond'}, text: stops.map(diagnosticText), hovertemplate: '%{text}<extra></extra>'})
   const ports = [input.pipe.start, input.pipe.end]
   traces.push({...line(ports, 'Fixed connections', '#ffd873'), mode: 'markers+text', marker: {color: '#ffd873', size: 5}, text: ['Start', 'End'], textposition: 'top center'})
   const view = plotLayout(input.name + (linked ? ':' + $('focus-route').checked : ''))
@@ -110,8 +243,10 @@ function drawRoute(input, result = null) {
     frameBounds(view, bounds)
   }
   $('route-legend').textContent = linked
-    ? 'The imported drawing stays visible. Orange is the selected run. Green is the suggestion. Checks use nearby extracted obstacle boxes inside the local test area.'
-    : 'Orange is the original route. Green is the suggestion. Drag to rotate. Lines show pipe centers. Checks include thickness.'
+    ? 'The imported drawing stays visible. Orange is the selected run. Green is the suggestion. Checks use nearby conservative obstacle envelopes inside the local test area.'
+    : 'Orange is the original route. Green is the suggestion. Drag to rotate. Lines show pipe centers. Shaded obstacles are conservative envelopes. Checks include thickness and clearance.'
+  if (input.obstacles.some(item => item.capsules?.length)) $('route-legend').textContent += ' Pipe-shaped envelopes are approximations of occupied space. Their broad search boxes are not shown as occupied volume.'
+  if (input.obstacles.some(item => item.capsules?.some(capsule => capsule.clip_min))) $('route-legend').textContent += ' Trimmed envelope ends follow analytic bounds. Display meshes can have open cut faces.'
   Plotly.react($('route-plot'), traces, view, plotConfig)
 }
 function unitsLabels() {document.querySelectorAll('.input-unit').forEach(node => node.textContent = $('input-units').value)}
@@ -122,7 +257,7 @@ function syncForm() {
   const linked = Boolean(layout.cad_context)
   $('cad-linked-note').hidden = !linked
   $('cad-view-controls').hidden = !linked || !routeDrawing
-  $('cad-linked-note').textContent = linked ? `${layout.obstacles.length} nearby obstacle boxes. Diameter is inferred from the source. To correct source units or choose another run use the CAD view.` : ''
+  $('cad-linked-note').textContent = linked ? `${geometryCoverage(layout)} Diameter is inferred from the source. To correct source units or choose another run use the CAD view.` : ''
   $('input-units').disabled = linked
   $('diameter').disabled = linked
   const contacts = layout.cad_context?.endpoint_contacts || []
@@ -195,11 +330,17 @@ function showFindings(result) {
   const issues = result.original.issues || []
   const context = result.normalized_layout?.cad_context
   paragraph(issues.length ? `${issues.length} finding${issues.length === 1 ? '' : 's'} on the original route` : 'The original route passes the implemented checks.', container, 'result-heading')
+  if (result.diagnostics?.length) {
+    paragraph('What stopped the search', container, 'result-heading')
+    list(result.diagnostics.map(diagnosticText), container)
+  }
   if (context) {
+    paragraph(geometryCoverage(result.normalized_layout), container)
+    paragraph(`${result.original.bends} sampled direction changes on the original centerline. This is not a count of physical fittings.`, container)
     const sources = new Map((context.obstacle_sources || []).map(item => [item.id,item]))
     const collisions = new Map()
     for (const item of issues) if (item.obstacle) collisions.set(item.obstacle,(collisions.get(item.obstacle) || 0) + 1)
-    if (context.endpoint_contacts?.length) paragraph(result.normalized_layout.protected_endpoints?.length ? 'The listed connection ends stay fixed. Contact is allowed only on those exact end sections. All obstacles still apply to the movable middle.' : 'A fixed connection point overlaps an obstacle box. This can be an intended pipe connection or a box that includes empty space. Use the connection controls to review it.', container)
+    if (context.endpoint_contacts?.length) paragraph(result.normalized_layout.protected_endpoints?.length ? 'The listed connection ends stay fixed. Contact is allowed only on those exact end sections. All obstacles still apply to the movable middle.' : 'A fixed connection point overlaps an obstacle envelope. This can be an intended pipe connection or an envelope that includes empty space. Use the connection controls to review it.', container)
     if (collisions.size) {
       const details = document.createElement('details'), summary = document.createElement('summary')
       summary.textContent = `${collisions.size} source objects overlap the checked pipe envelope`
@@ -209,9 +350,9 @@ function showFindings(result) {
     }
     const others = issues.filter(item => !item.obstacle)
     if (others.length) list(others.slice(0,40).map(item => item.message || item.code), container)
-    paragraph('This is a local test of one inferred run. Boxes can overstate occupied space near fittings. Unextracted surfaces and missing ship structure remain unchecked.', container)
+    paragraph('This is a local test of one inferred run. Conservative envelopes can overstate occupied space near bends and fittings. Unextracted surfaces and missing ship structure remain unchecked.', container)
   } else {
-    if (issues.length) list(issues.slice(0,80).map(i => `${i.segment === undefined ? '' : 'Segment ' + (i.segment + 1) + ' · '}${i.message || i.code}`), container)
+    if (issues.length) list(issues.slice(0,80).map(i => `${i.segment === undefined ? '' : 'Segment ' + (i.segment + 1) + ' · '}${diagnosticText(i)}`), container)
     if (issues.length > 80) paragraph(`Showing the first 80 findings. The result file contains all ${issues.length}.`, container)
   }
   paragraph(result.search?.reason || '', container)
@@ -368,7 +509,7 @@ async function prepareCad() {
     $('show-obstacles').checked = false
     tab('routing')
     syncForm()
-    $('run-status').textContent = `CAD test ready with ${layout.obstacles.length} nearby obstacle boxes. Click Check and improve route.`
+    $('run-status').textContent = `CAD test ready. ${geometryCoverage(layout)} Click Check and improve route.`
     $('prepare-status').textContent = 'Test prepared. The route checker now includes the drawing.'
   } catch (e) {error(e.message); $('prepare-status').textContent = 'The local test could not be prepared.'}
   finally {updatePrepareButton()}

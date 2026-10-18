@@ -54,7 +54,7 @@ def test_health_identifies_compatible_local_service(autocad_workspace):
     assert status == 200
     assert result == {
         "service": "maritime-pipe-router", "api_version": 1,
-        "capabilities": ["cad_snapshot", "route_search"], "units": "mm",
+        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes"], "units": "mm",
     }
 
 

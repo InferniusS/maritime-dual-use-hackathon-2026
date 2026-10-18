@@ -4,7 +4,34 @@ AutoCAD 2027 is already installed on the event laptop. The setup photo also show
 
 AutoCAD and the Python routing service run on this same laptop. The Mac and IQ9 board do not need to be connected.
 
-The code has passed its Mac checks and the DLL has compiled. The team has now run the small line test and saved its green suggestion inside AutoCAD on this laptop. If you have completed that test continue with section 6. The real drawing command and Undo still need separate live checks.
+The team has saved the small line suggestion inside AutoCAD and received a result from the real cooling drawing on this laptop. The newest pipe-shape geometry update passed its Mac checks. Its real-drawing preview and Save still need the venue test.
+
+## Update an existing working setup
+
+This update changes the geometry reader and routing code as well as the plugin. Follow these steps if Python is already installed and the small test works.
+
+1. Save any drawing work you need and close AutoCAD completely.
+2. In the Python PowerShell window press **Ctrl+C**. Wait for the `PS` prompt.
+3. Download the latest repo ZIP and extract it into a temporary folder.
+4. Copy the new `pipe_router` and `scripts` and `autocad-plugin` folders into your existing project folder. Merge folders and replace matching files. Also copy `web` and `tests` and `docs` and `README.md` to keep the fallback and instructions current.
+5. Keep your existing `.venv` and `data` folders and your drawing files.
+6. In PowerShell open the existing project folder. For the team's Desktop setup use:
+
+```powershell
+cd "$env:USERPROFILE\Desktop\maritime-dual-use-hackathon-2026-main"
+```
+
+Start the service:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_web.py
+```
+
+Leave that window running. Open [the health page](http://127.0.0.1:8767/api/health) on the Snapdragon and refresh it. The `capabilities` list must include **`pipe_envelopes`**. If it does not you are still running older Python files.
+
+Reopen AutoCAD and run `NETLOAD`. Choose the fresh `autocad-plugin\prebuilt\Maritime.AutoCAD.dll` from the existing project folder. Then follow section 6 to rerun `MARITIMECAD`. Review the listed end contacts before accepting them.
+
+This update uses the existing package installation. You do not need to rebuild `.venv` or install a training dataset.
 
 ## 1. Open the project folder
 
@@ -86,7 +113,7 @@ Workspace: http://127.0.0.1:8767/
 
 Leave this window open. The command stays running and does not return to the PowerShell prompt. That is expected. AutoCAD sends its requests to this process.
 
-On the Snapdragon laptop open [the service check](http://127.0.0.1:8767/api/health) in a browser. It should show `maritime-pipe-router` with `api_version` set to `1` and `units` set to `mm`.
+On the Snapdragon laptop open [the service check](http://127.0.0.1:8767/api/health) in a browser. It should show `maritime-pipe-router` with `api_version` set to `1` and `units` set to `mm`. The latest geometry service includes `pipe_envelopes` in its capabilities.
 
 That address always means the computer where you open it. Opening it on the Mac does not check the Snapdragon service. Once you have checked it you can close the browser tab. The PowerShell service must stay running.
 
@@ -188,7 +215,9 @@ The command lists possible routes associated with the selected object. Enter the
 
 The chosen route appears in cyan before the calculation. Check that it follows the intended pipe and that its endpoints are in the right place. Press Enter to continue or Esc to cancel.
 
-If obstacle boxes touch its ends the command lists those contacts. The default answer to treating them as intended fixed connections is **No**. Choose Yes only after reviewing them. It preserves a bounded section at each accepted end. The initial maximum length is 250 mm. It does not remove those obstacles from checks on the movable middle.
+If obstacle envelopes touch its ends the command lists those contacts. The default answer to treating them as intended fixed connections is **No**. Choose Yes only after reviewing them. It preserves a bounded section at each accepted end. The initial maximum length is 250 mm. This is a cap rather than a command to preserve exactly 250 mm. It does not remove those obstacles from checks on the movable middle.
+
+The latest Mac test of source handle `DB1` returns a 2558.00 mm checked replacement for the 2413.47 mm original. The original fails the selected 50 mm clearance near source `DD7`. The longer suggestion repairs that issue under the implemented checks. Its local test keeps 43 pipe-shaped obstacles and 33 fallback boxes. The live Snapdragon result still needs review against the drawing.
 
 Our saved cooling example uses source handle `DB2` and a joined route containing `DB2` and `E6D` and `E16`. Its inferred diameter is 88.9 mm and its original length is about 3679.25 mm. You can inspect a selected object's handle with AutoCAD's `LIST` command. Handles can differ if the source drawing has changed.
 
@@ -219,38 +248,23 @@ To stop the Python service press Ctrl+C in its PowerShell window. Closing the br
 
 When the team publishes a new DLL close AutoCAD after saving any work you need. Get the updated repo files. Restart the Python service and reopen AutoCAD before loading the new DLL. AutoCAD may retain a loaded assembly until it exits.
 
-If you downloaded a ZIP use a fresh extracted folder for the update and repeat the Python setup there. Keep your drawings and result reports from the old folder. If you cloned the repo use your normal Git update workflow instead.
+For a downloaded ZIP use [the update steps above](#update-an-existing-working-setup) to merge files into the existing project while keeping the environment and reports. If you cloned the repo use your normal Git update workflow instead.
 
 ## 8. If a step fails
 
 ### A connection error while the health page still works
 
-The venue run reached the real pipe calculation but reported a generic request error. The health page still responded. This does not establish why the calculation request failed.
+An earlier venue run reported `ResponseEnded` before `/api/run` reached Python. The connection update fixed that path on the Snapdragon. The request now reaches the service and returns a result. The plugin uses a fresh connection for each request and the server closes completed responses explicitly.
 
-The diagnostic build showed `ResponseEnded` for `/api/run`. The Python log showed successful preparation but no calculation request arriving. A controlled Mac test reproduced a similar connection failure when the server delayed closing a completed connection.
+If this returns after an update keep both the full AutoCAD error and the latest PowerShell lines. Check the health page. Use the same repo version for the Python files and DLL. Restart both through [the update steps](#update-an-existing-working-setup).
 
-The updated plugin now opens a fresh connection for each request. The server also explicitly says that each response closes its connection. No automatic calculation retry is added and routing rules are unchanged. Detailed AutoCAD errors and Python request logs remain available.
+The current geometry update is larger than the earlier connection patch. Replacing only `run_web.py` leaves out the new pipe-shape checks.
 
-The connection changes passed repeated .NET 10 requests against the delayed-close test server on the Mac. The exact AutoCAD workflow still needs a retry on the Snapdragon.
+### A calculation returns no accepted route
 
-For the quickest venue retry replace only `scripts/run_web.py` from the latest download. Stop Python with Ctrl+C before replacing it and restart it afterward. The explicit server close header also passed 30 requests with the older client in the controlled test. AutoCAD can stay open for this server-only update. The full update below also installs the plugin's fresh-connection handling.
+A completed request is separate from a valid route. The earlier `DB1` result was stopped by a large obstacle box near its fixed start section. The new Mac replay uses pipe envelopes and finds a checked replacement under the same provisional settings. See [the milestone results](pipe-shape-milestone.md).
 
-To update an existing working setup:
-
-1. Save any drawing work you need and close AutoCAD completely.
-2. Press Ctrl+C in the Python PowerShell window to stop that service.
-3. Download a fresh repo ZIP from GitHub using Code then Download ZIP. Extract it to a temporary folder.
-4. Copy `scripts/run_web.py` from that download over the same file in your existing project folder.
-5. Copy `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` and `autocad-plugin/prebuilt/build-info.json` over those files in your existing project folder.
-6. Keep the existing `.venv` and drawings. Start the service again with the command below from the existing project folder.
-
-```powershell
-.\.venv\Scripts\python.exe scripts\run_web.py
-```
-
-Reopen AutoCAD and use `NETLOAD` to load the updated DLL. Retry `MARITIMECAD` with the same selection and settings. Keep the full AutoCAD message and the latest Python request log together if it fails. Do not start a second service while a calculation is still running.
-
-The Mac replay of source `DB1` with 50 mm clearance and 250 mm fixed ends returned `no_route` normally. A nearby obstacle box blocks the checked route. This is a separate result from the connection failure. The imported geometry and accepted end contacts still need review before interpreting it as a real physical collision.
+Other selections can still fail. `DC1` exceeds the 250 mm connection cap during preparation. Read the source handle and reason in the report before changing settings. A no-route result does not establish that the source design is wrong or that no route exists.
 
 | What you see | What to do next |
 | --- | --- |

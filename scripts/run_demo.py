@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 import hashlib
 import html
 import json
+import math
 from pathlib import Path
 import platform
+import re
 import sys
 import time
 
@@ -40,7 +42,7 @@ def box_vertices(box):
     ]
 
 
-def add_box(figure, box, name, color, opacity):
+def add_box(figure, box, name, color, opacity, *, showlegend=True, legendgroup=None, hover=None):
     points = box_vertices(box)
     triangles = [(0, 1, 2), (0, 2, 3), (4, 6, 5), (4, 7, 6),
                  (0, 4, 5), (0, 5, 1), (1, 5, 6), (1, 6, 2),
@@ -48,9 +50,119 @@ def add_box(figure, box, name, color, opacity):
     figure.add_trace(go.Mesh3d(
         x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
         i=[t[0] for t in triangles], j=[t[1] for t in triangles], k=[t[2] for t in triangles],
-        name=name, color=color, opacity=opacity, flatshading=True, showlegend=True,
-        hovertemplate=name + "<extra></extra>",
+        name=name, color=color, opacity=opacity, flatshading=True, showlegend=showlegend,
+        legendgroup=legendgroup, meta={"obstacle_id": box["id"]},
+        hovertemplate=(hover or name) + "<extra></extra>",
     ))
+
+
+def clip_mesh(vertices, triangles, low, high):
+    """Clip display triangles to analytic bounds without inventing curved caps."""
+    result_vertices, result_triangles = [], []
+    for triangle in triangles:
+        polygon = [vertices[index] for index in triangle]
+        for axis in range(3):
+            for boundary, direction in ((low[axis], 1), (high[axis], -1)):
+                if not polygon:
+                    break
+                clipped = []
+                previous = polygon[-1]
+                previous_inside = direction*(previous[axis]-boundary) >= 0
+                for current in polygon:
+                    current_inside = direction*(current[axis]-boundary) >= 0
+                    if current_inside != previous_inside:
+                        fraction = (boundary-previous[axis])/(current[axis]-previous[axis])
+                        intersection = [a + fraction*(b-a) for a, b in zip(previous, current)]
+                        intersection[axis] = boundary
+                        clipped.append(intersection)
+                    if current_inside:
+                        clipped.append(current)
+                    previous, previous_inside = current, current_inside
+                polygon = clipped
+        if len(polygon) >= 3:
+            offset = len(result_vertices)
+            result_vertices.extend(polygon)
+            result_triangles.extend((offset, offset+i, offset+i+1) for i in range(1, len(polygon)-1))
+    return result_vertices, result_triangles
+
+
+def capsule_mesh(capsules, sides=12, hemisphere_steps=4):
+    """Tessellate the supplied envelopes for display, not for collision checks."""
+    vertices, triangles = [], []
+    def cross(a, b):
+        return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]
+    for capsule in capsules:
+        start, end, radius = capsule["start"], capsule["end"], capsule["radius"]
+        delta = [b-a for a, b in zip(start, end)]
+        length = math.sqrt(sum(v*v for v in delta))
+        axis = [v/length for v in delta] if length else [0, 0, 1]
+        helper = [1, 0, 0] if abs(axis[0]) < .9 else [0, 1, 0]
+        u = cross(axis, helper)
+        norm = math.sqrt(sum(v*v for v in u))
+        u = [v/norm for v in u]
+        v = cross(axis, u)
+        rings = []
+        for center, first in ((start, -math.pi/2), (end, 0)):
+            for step in range(hemisphere_steps + 1):
+                angle = first + step * math.pi / (2*hemisphere_steps)
+                axial, radial = radius*math.sin(angle), radius*math.cos(angle)
+                rings.append([[center[k] + axial*axis[k] + radial*(u[k]*math.cos(math.tau*j/sides) + v[k]*math.sin(math.tau*j/sides))
+                               for k in range(3)] for j in range(sides)])
+        capsule_vertices = [point for ring in rings for point in ring]
+        capsule_triangles = []
+        for row in range(len(rings)-1):
+            for j in range(sides):
+                a, b = row*sides+j, row*sides+(j+1)%sides
+                capsule_triangles.extend(((a, b, a+sides), (b, b+sides, a+sides)))
+        if "clip_min" in capsule:
+            capsule_vertices, capsule_triangles = clip_mesh(
+                capsule_vertices, capsule_triangles, capsule["clip_min"], capsule["clip_max"])
+        offset = len(vertices)
+        vertices.extend(capsule_vertices)
+        triangles.extend(tuple(offset+index for index in triangle) for triangle in capsule_triangles)
+    return vertices, triangles
+
+
+def geometry_coverage(layout):
+    obstacles = layout.get("obstacles", [])
+    envelopes = sum(bool(item.get("capsules")) for item in obstacles)
+    text = f"{len(obstacles)} nearby obstacle objects. {envelopes} use pipe-shaped envelopes. {len(obstacles)-envelopes} use box envelopes."
+    if envelopes:
+        text += " Shaded pipe shapes show the supplied conservative envelopes. They are not exact CAD solids. Broad search boxes for these objects are not shown as occupied space."
+        if any("clip_min" in capsule for item in obstacles for capsule in item.get("capsules", [])):
+            text += " Trimmed envelope ends use the supplied analytic bounds. Display meshes can have open cut faces."
+    counts = layout.get("cad_context", {}).get("counts", {})
+    missing = counts.get("solid_instances_without_extracted_geometry")
+    if isinstance(missing, int) and missing:
+        text += f" {missing} source solid instances have no extracted geometry."
+    curves = counts.get("explicit_curve_objects_unchecked")
+    if isinstance(curves, int) and curves:
+        text += f" {curves} explicit curve objects are not collision obstacles."
+    if layout.get("cad_context"):
+        text += " This count does not establish complete ship geometry."
+    return text
+
+
+def diagnostic_text(item):
+    message = str(item.get("message", item.get("code", "Review finding")))
+    details = []
+    if item.get("stage"):
+        details.append(str(item["stage"]).replace("_", " "))
+    if item.get("source_handle"):
+        source = "source " + str(item["source_handle"])
+        already_named = re.search(r"\bsource\s+" + re.escape(str(item["source_handle"])) + r"(?![\w-])", message, re.IGNORECASE)
+        placement = "/".join(map(str, item.get("instance_path", [])))
+        if not already_named:
+            details.append(source + (" in " + placement if placement else ""))
+        elif placement and placement not in message:
+            details.append("instance " + placement)
+    if item.get("obstacle") and str(item["obstacle"]) not in message:
+        details.append(str(item["obstacle"]))
+    if item.get("obstacle_method"):
+        details.append(str(item["obstacle_method"]).replace("_", " "))
+    if item.get("point") is not None:
+        details.append("point " + ", ".join(f"{value:g}" for value in item["point"]) + " mm")
+    return message + (" (" + " · ".join(details) + ")" if details else "")
 
 
 def make_figure(layout, result):
@@ -66,8 +178,31 @@ def make_figure(layout, result):
         name="Assumed local search area" if layout.get("cad_context") else "Supplied routing boundary",
         hoverinfo="skip",
     ))
+    sources = {item["id"]: item for item in layout.get("cad_context", {}).get("obstacle_sources", [])}
+    shown_groups = set()
     for obstacle in layout["obstacles"]:
-        add_box(figure, obstacle, "Obstacle: " + html.escape(obstacle["id"]), "#8394ab", 0.55)
+        kind = "pipe-envelopes" if obstacle.get("capsules") else "box-envelopes"
+        showlegend = kind not in shown_groups
+        shown_groups.add(kind)
+        source = sources.get(obstacle["id"], obstacle)
+        hover = html.escape(obstacle["id"])
+        if source.get("source_handle"):
+            hover += "<br>Source " + html.escape(str(source["source_handle"]))
+        if source.get("instance_path"):
+            hover += "<br>Instance " + html.escape("/".join(map(str, source["instance_path"])))
+        hover += "<br>Conservative envelope"
+        if obstacle.get("capsules"):
+            points, triangles = capsule_mesh(obstacle["capsules"])
+            figure.add_trace(go.Mesh3d(
+                x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+                i=[t[0] for t in triangles], j=[t[1] for t in triangles], k=[t[2] for t in triangles],
+                name="Pipe envelopes", color="#99b8d0", opacity=.45, showlegend=showlegend,
+                legendgroup=kind, meta={"obstacle_id": obstacle["id"]},
+                hovertemplate=hover + "<extra></extra>",
+            ))
+        else:
+            add_box(figure, obstacle, "Box envelopes", "#8394ab", 0.55,
+                    showlegend=showlegend, legendgroup=kind, hover=hover)
 
     for key, label, color, dash in (
         ("original", "Original route", "#f5a55b", "dash"),
@@ -92,6 +227,14 @@ def make_figure(layout, result):
             showlegend=index == 0, line={"color": "#ffd166", "width": 10},
             hovertemplate="Fixed " + record["endpoint"] + " section<br>x %{x} mm<br>y %{y} mm<br>z %{z} mm<extra></extra>",
         ))
+    stops = [item for item in result.get("diagnostics", []) if isinstance(item.get("point"), (list, tuple))
+             and len(item["point"]) == 3 and all(isinstance(v, (int, float)) and math.isfinite(v) for v in item["point"])]
+    if stops:
+        figure.add_trace(go.Scatter3d(
+            x=[item["point"][0] for item in stops], y=[item["point"][1] for item in stops], z=[item["point"][2] for item in stops],
+            mode="markers", name="Search diagnostic points", marker={"color": "#ff7588", "size": 7, "symbol": "diamond"},
+            text=[html.escape(diagnostic_text(item)) for item in stops], hovertemplate="%{text}<extra></extra>",
+        ))
     points = [layout["pipe"]["start"], layout["pipe"]["end"]]
     figure.add_trace(go.Scatter3d(
         x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
@@ -103,7 +246,7 @@ def make_figure(layout, result):
     figure.update_layout(
         template="plotly_dark", paper_bgcolor="#102035", plot_bgcolor="#102035",
         height=560, margin={"l": 5, "r": 5, "t": 10, "b": 5},
-        legend={"orientation": "h", "y": 1.08, "x": 0},
+        legend={"orientation": "h", "y": 1.08, "x": 0, "groupclick": "togglegroup"},
         scene={"aspectmode": "data", "camera": {"eye": {"x": 1.5, "y": 1.7, "z": 1.1}},
                "xaxis": {**axis, "title": "x / mm"},
                "yaxis": {**axis, "title": "y / mm"},
@@ -134,7 +277,24 @@ def write_dxf(layout, result, destination):
             space.add_polyline3d(record["points"], dxfattribs={"layer": fixed_layer})
     obstacle_layer = prefix + "_OBSTACLE"
     document.layers.add(obstacle_layer, color=8)
+    envelope_layer = prefix + "_ENVELOPE_AXES"
+    if any(item.get("capsules") for item in layout["obstacles"]):
+        document.layers.add(envelope_layer, color=9)
     for obstacle in layout["obstacles"]:
+        if obstacle.get("capsules"):
+            for index, capsule in enumerate(obstacle["capsules"]):
+                start, end = capsule["start"], capsule["end"]
+                if start != end:
+                    space.add_line(start, end, dxfattribs={"layer": envelope_layer})
+                else:
+                    space.add_point(start, dxfattribs={"layer": envelope_layer})
+                space.add_text(
+                    f"{obstacle['id']} envelope axis {index+1}. Radius {capsule['radius']:g} mm. Not a pipe centerline."
+                    + (" Clip bounds " + ", ".join(f"{v:g}" for v in capsule["clip_min"]) + " to "
+                       + ", ".join(f"{v:g}" for v in capsule["clip_max"]) + " mm." if "clip_min" in capsule else ""),
+                    dxfattribs={"layer": envelope_layer, "insert": start, "height": max(2, min(20, capsule["radius"]/3))},
+                )
+            continue
         points = box_vertices(obstacle)
         for indices in ((0, 1, 2, 3, 0), (4, 5, 6, 7, 4), (0, 4), (1, 5), (2, 6), (3, 7)):
             space.add_polyline3d([points[i] for i in indices], dxfattribs={"layer": obstacle_layer})
@@ -159,9 +319,10 @@ def write_html(layout, result, elapsed, destination):
         if key == "valid":
             return "Pass implemented checks" if route[key] else "Needs attention"
         return f"{route[key]:,.0f}" + (" mm" if key == "length" else "")
+    direction_label = "Sampled direction changes (not fittings)" if not synthetic else "Direction changes"
     rows = "".join(
         f"<tr><th>{label}</th><td>{metric(original, key)}</td><td>{metric(candidate, key)}</td></tr>"
-        for label, key in (("Route length", "length"), ("Direction changes", "bends"), ("Implemented checks", "valid"))
+        for label, key in (("Route length", "length"), (direction_label, "bends"), ("Implemented checks", "valid"))
     )
     points = "" if candidate is None else "".join(
         "<tr><td>" + str(i + 1) + "</td>" + "".join(f"<td>{value:g}</td>" for value in point) + "</tr>"
@@ -170,8 +331,13 @@ def write_html(layout, result, elapsed, destination):
     issue_items = []
     for key, label in (("original", "Original"), ("candidate", "Suggested")):
         if result.get(key):
-            issue_items.extend(f"<li>{label}: {escape(issue['message'])}</li>" for issue in result[key]["issues"])
+            issue_items.extend(f"<li>{label}: {escape(diagnostic_text(issue))}</li>" for issue in result[key]["issues"])
     issues = "<ul>" + "".join(issue_items) + "</ul>" if issue_items else "<p>No issues found by the implemented checks.</p>"
+    diagnostics = ""
+    if result.get("diagnostics"):
+        diagnostics = '<section class="panel"><h2>What stopped the search</h2><ul>' + "".join(
+            f"<li>{escape(diagnostic_text(item))}</li>" for item in result["diagnostics"]
+        ) + "</ul></section>"
     assumptions = list(dict.fromkeys(layout.get("assumptions", []) + result.get("assumptions", [])))
     limits = result.get("limitations", [])
     assumption_list = "".join(f"<li>{escape(item)}</li>" for item in assumptions)
@@ -210,7 +376,8 @@ def write_html(layout, result, elapsed, destination):
     )
     system_text = "Gravity drain" if gravity else "Pressurized pipe"
     boundary_text = "an assumed local search area" if layout.get("cad_context") else "the supplied boundary"
-    coverage_text = f"Checks cover fixed endpoints and {boundary_text}. They check the pipe plus selected clearance against the obstacle boxes."
+    coverage_text = f"Checks cover fixed endpoints and {boundary_text}. They check the pipe plus selected clearance against the supplied obstacle envelopes."
+    coverage_text += " " + geometry_coverage(layout)
     if layout.get("protected_endpoints"):
         coverage_text += " Yellow end sections must remain unchanged. Contact with their listed connection objects is allowed only along those fixed sections. The movable route still checks every obstacle. Connection identities remain assumptions."
     if gravity:
@@ -223,6 +390,8 @@ def write_html(layout, result, elapsed, destination):
         coverage_text += " Available tangent length is checked against the selected bend radius. Actual curved fitting volumes are not checked."
     source_units = escape(str(result.get("input_units", layout["units"])))
     export_text = "synthetic centerlines and obstacle outlines" if synthetic else "CAD-derived review centerlines and the supplied obstacle outlines"
+    if any(item.get("capsules") for item in layout["obstacles"]):
+        export_text = "review centerlines, box outlines and labeled envelope axes with their radii. Envelope axes are not physical pipes"
     content = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pipe route review</title>
@@ -254,6 +423,7 @@ a {{ color: #55dcc8 }}
 {benchmark_panel}
 <div class="panel"><table><thead><tr><th>Measure</th><th>Original</th><th>Suggested</th></tr></thead><tbody>{rows}</tbody></table>
 <p class="muted">{coverage_text}</p></div>
+{diagnostics}
 <div class="panel plot">{plot}</div>
 <p class="muted">Drag to rotate. Click a legend item to hide it. Lines show pipe centers. The collision check also accounts for pipe thickness.</p>
 <div class="columns"><section class="panel"><h2>Check results</h2>{issues}

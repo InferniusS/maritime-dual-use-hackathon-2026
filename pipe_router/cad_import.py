@@ -20,6 +20,8 @@ from ezdxf.math import Matrix44, Vec3
 UNIT_FACTORS = {"mm": 1.0, "in": 25.4, "m": 1000.0}
 TAU = math.tau
 SAMPLES = 32
+ENVELOPE_TORUS_SEGMENTS = 48
+MAX_SOLID_ENVELOPE_CAPSULES = 256
 
 
 def _data(entity):
@@ -235,6 +237,200 @@ def _xyz(points, matrix, factor):
     return result
 
 
+def _uniform_envelope_scale(matrix):
+    """Reject scaling/shear that changes circles and bound residual roundoff."""
+    basis = [matrix.transform_direction(Vec3(*axis)) for axis in ((1,0,0), (0,1,0), (0,0,1))]
+    lengths = [vector.magnitude for vector in basis]
+    if not all(math.isfinite(length) for length in lengths) or min(lengths) <= 1e-12:
+        return None
+    if max(lengths) - min(lengths) > max(lengths) * 1e-7:
+        return None
+    gram = [[a.dot(b) for b in basis] for a in basis]
+    if any(abs(gram[i][j]) > lengths[i] * lengths[j] * 1e-7
+           for i, j in ((0,1), (0,2), (1,2))):
+        return None
+    # The maximum absolute row sum bounds the largest Gram eigenvalue.
+    # This upper bound covers tiny numerical departures from an exact rotation.
+    return math.sqrt(max(sum(abs(value) for value in row) for row in gram)) * (1 + 1e-12)
+
+
+def _envelope_trim_edges(face):
+    """Require complete loop and coedge traversal before trusting finite trims."""
+    loop = _data(face)[2]
+    edges, seen_loops = [], set()
+    while _name(loop) != "null-ptr":
+        if _name(loop) != "loop" or id(loop) in seen_loops:
+            return None
+        seen_loops.add(id(loop))
+        loop_data = _data(loop)
+        if loop_data[3] is not face:
+            return None
+        first = loop_data[2]
+        coedge, seen_coedges = first, set()
+        while True:
+            if _name(coedge) != "coedge" or id(coedge) in seen_coedges:
+                return None
+            seen_coedges.add(id(coedge))
+            data = _data(coedge)
+            if data[6] is not loop or _name(data[4]) != "edge":
+                return None
+            if data[4] not in edges:
+                edges.append(data[4])
+            coedge = data[1]
+            if coedge is first:
+                break
+        loop = loop_data[1]
+    return edges
+
+
+def _finite_radial_clip(start, end, axis, radius, axial_pad, matrix, factor):
+    """Conservative world AABB for a finite circular strip or planar disk.
+
+    Transform the transverse basis directly so accepted matrix roundoff does
+    not accidentally shrink the bounds. For an exact uniform transform each
+    extent equals world_radius * sqrt(1 - world_axis_component**2).
+    """
+    axis = axis.normalize()
+    reference = min((Vec3(1,0,0), Vec3(0,1,0), Vec3(0,0,1)), key=lambda vector: abs(axis.dot(vector)))
+    u = matrix.transform_direction(axis.cross(reference).normalize())
+    v = matrix.transform_direction(axis.cross(axis.cross(reference).normalize()).normalize())
+    longitudinal = matrix.transform_direction(axis)
+    points = _xyz([start, end], matrix, factor)
+    padding = max(1e-7, radius * 1e-12)
+    extents = [(radius * math.hypot(u[i], v[i]) + axial_pad * abs(longitudinal[i])
+                + padding * _uniform_envelope_scale(matrix)) * factor for i in range(3)]
+    low = [min(point[i] for point in points) - extents[i] for i in range(3)]
+    high = [max(point[i] for point in points) + extents[i] for i in range(3)]
+    if not all(math.isfinite(value) for value in (*low, *high)):
+        return None
+    return {"clip_min": low, "clip_max": high}
+
+
+def _circle_axial_extent(circle, axis):
+    minor = circle["normal"].cross(circle["major"]) * circle["ratio"]
+    return math.hypot(circle["major"].dot(axis), minor.dot(axis))
+
+
+def _face_envelope_capsules(face, matrix, factor):
+    """Cover a supported analytic face without relying on sampled preview arcs."""
+    scale = _uniform_envelope_scale(matrix)
+    if scale is None:
+        return None, "nonuniform_or_sheared_transform"
+    surface = _data(face)[5]
+    data = _data(surface)
+    kind = _name(surface)
+    local = []
+    clip = None
+    if kind == "torus-surface":
+        # Cover the complete analytic torus. Unknown trim boundaries cannot
+        # make this envelope smaller than the real trimmed torus surface.
+        center, normal = _vec(data[1:4]), _vec(data[4:7])
+        major, minor = float(data[7]), abs(float(data[8]))
+        if not all(math.isfinite(v) for v in (*center, *normal, major, minor)):
+            return None, "invalid_analytic_torus"
+        if normal.magnitude <= 1e-12 or not major > minor > 0:
+            return None, "unsupported_analytic_torus"
+        normal = normal.normalize()
+        reference = min((Vec3(1,0,0), Vec3(0,1,0), Vec3(0,0,1)), key=lambda vector: abs(normal.dot(vector)))
+        u = normal.cross(reference).normalize()
+        v = normal.cross(u).normalize()
+        count = ENVELOPE_TORUS_SEGMENTS
+        centers = [center + major * (u * math.cos(TAU * i / count) + v * math.sin(TAU * i / count))
+                   for i in range(count)]
+        # Every circular arc lies within this distance of its chord. Adding
+        # the tube radius makes the chord capsules cover the full torus tube.
+        sag = major * (1 - math.cos(math.pi / count))
+        safety = max(1e-7, major * 1e-12, minor * 1e-12)
+        radius = minor + sag + safety
+        local = [(centers[i], centers[(i + 1) % count], radius) for i in range(count)]
+    elif kind in ("cone-surface", "plane-surface"):
+        edges = _envelope_trim_edges(face)
+        if edges is None:
+            return None, "incomplete_face_trims"
+        patch = _surface_patch(face)
+        if patch is None:
+            return None, f"unsupported_face:{kind}"
+        detail = patch[2]
+        circles = [_full_circle(edge) for edge in edges]
+        if len(circles) != 2 or any(circle is None for circle in circles):
+            return None, f"unsupported_trim:{kind}"
+        a, b = circles
+        if detail["kind"] == "cylinder":
+            # Preview tolerances alone cannot certify a cone as a cylinder.
+            if float(data[13]) != 0.0 or not math.isclose(abs(float(data[14])), 1.0, abs_tol=1e-12):
+                return None, "nonzero_cone_angle"
+            origin, axis = _vec(data[1:4]), _vec(data[4:7]).normalize()
+            radial_errors = [(circle["center"] - origin).cross(axis).magnitude for circle in circles]
+            # Keep small source tolerances conservative rather than assuming
+            # the two nearly coincident surface axes are exactly identical.
+            radius = max(circle["radius"] * max(1.0, circle["ratio"]) for circle in circles)
+            surface_radius = _vec(data[7:10]).magnitude * max(1.0, abs(float(data[10])))
+            radius = max(radius, surface_radius, abs(float(data[15])))
+            radius += max(radial_errors) + max(1e-7, radius * 1e-12)
+            local = [(a["center"], b["center"], radius)]
+            axial_pad = max(_circle_axial_extent(circle, axis) for circle in circles)
+            clip = _finite_radial_clip(a["center"], b["center"], axis, radius, axial_pad, matrix, factor)
+        elif detail["kind"] == "annulus":
+            # A sphere encloses the complete disk, and hence every annulus.
+            radius = max(a["radius"] * max(1.0, a["ratio"]),
+                         b["radius"] * max(1.0, b["ratio"]) + (b["center"] - a["center"]).magnitude)
+            radius += max(1e-7, radius * 1e-12)
+            local = [(a["center"], a["center"], radius)]
+            axis = _vec(data[4:7]).normalize()
+            axial_pad = max(abs((circle["center"] - a["center"]).dot(axis))
+                            + _circle_axial_extent(circle, axis) for circle in circles)
+            clip = _finite_radial_clip(a["center"], a["center"], axis, radius, axial_pad, matrix, factor)
+        else:
+            return None, f"unsupported_patch:{detail['kind']}"
+    else:
+        return None, f"unsupported_face:{kind or 'unknown'}"
+    capsules = []
+    for start, end, radius in local:
+        points = _xyz([start, end], matrix, factor)
+        scaled_radius = radius * scale * factor
+        if not math.isfinite(scaled_radius) or scaled_radius <= 0:
+            return None, "invalid_envelope_radius"
+        capsules.append({"start": points[0], "end": points[1], "radius": scaled_radius, **(clip or {})})
+    return capsules, None
+
+
+def _solid_envelope(builder, parent_matrix, factor, base):
+    """Allow capsule use only when every analytic source face is covered."""
+    faces = [entity for entity in builder.entities if _name(entity) == "face"]
+    record = {
+        "source_handle": base["source_handle"], "instance_path": list(base["instance_path"]),
+        "eligible": False, "capsules": [], "reason": "no_source_faces",
+        "face_count": len(faces), "supported_face_count": 0,
+        "scope": "Conservative envelope of all supported analytic source faces. No semantic or full-ship verification",
+        "method": "analytic_cylinder_annulus_full_torus_capsules",
+        "torus_segments": ENVELOPE_TORUS_SEGMENTS,
+        "capsule_limit": MAX_SOLID_ENVELOPE_CAPSULES,
+    }
+    if not faces:
+        return record
+    capsules, reasons = [], []
+    for face in faces:
+        try:
+            matrix = Matrix44.chain(_body_matrix(face), parent_matrix)
+            envelope, reason = _face_envelope_capsules(face, matrix, factor)
+        except (ValueError, TypeError, IndexError, AttributeError, ZeroDivisionError, OverflowError, AcisException) as error:
+            envelope, reason = None, f"face_envelope_failed:{type(error).__name__}"
+        if envelope is None:
+            reasons.append(reason or "unsupported_face")
+            continue
+        record["supported_face_count"] += 1
+        capsules.extend(envelope)
+    if reasons:
+        record["reason"] = " / ".join(sorted(set(reasons)))
+    elif len(capsules) > MAX_SOLID_ENVELOPE_CAPSULES:
+        record["reason"] = "capsule_limit_exceeded"
+    elif capsules:
+        record.update({"eligible": True, "capsules": capsules, "reason": "all_source_faces_supported"})
+    else:
+        record["reason"] = "no_supported_capsules"
+    return record
+
+
 def _candidate_chains(candidates, tolerance=0.001):
     """Group geometrically continuous axes inside a single source solid only.
 
@@ -337,7 +533,7 @@ def inspect_cad(path, source_units="mm"):
     assumption = units_code != expected_code
     if assumption:
         warnings.append(f"Source units are assumed to be {source_units}. DXF $INSUNITS is {units_code}. All output is converted to mm.")
-    objects, candidates = [], []
+    objects, candidates, solid_envelopes = [], [], []
     counts = Counter()
     unsupported = Counter()
 
@@ -369,8 +565,14 @@ def inspect_cad(path, source_units="mm"):
                 continue
             if kind in ("3DSOLID", "BODY", "REGION"):
                 counts["solid_instances"] += 1
+                envelope = {
+                    "source_handle": handle, "instance_path": list(instance_path), "eligible": False,
+                    "capsules": [], "reason": "acis_parse_failed", "face_count": 0, "supported_face_count": 0,
+                }
+                solid_envelopes.append(envelope)
                 try:
                     builder = _parse_acis(entity)
+                    envelope.update(_solid_envelope(builder, parent_matrix, factor, base))
                     index_of = {id(item): i for i, item in enumerate(builder.entities)}
                     seen_edges = set()
                     for face in builder.entities:
@@ -419,6 +621,7 @@ def inspect_cad(path, source_units="mm"):
                     counts["parsed_solid_instances"] += 1
                 except (ValueError, TypeError, IndexError, AttributeError, ZeroDivisionError, AcisException, ezdxf.DXFError) as error:
                     warnings.append(f"Partial or failed extraction of solid {base['id']}: {error}")
+                    envelope.update({"eligible": False, "capsules": [], "reason": "partial_or_failed_solid_extraction"})
                     counts["failed_solid_instances"] += 1
             elif kind == "LINE":
                 add_object(base, "curve", {"kind": "polyline", "points": _xyz([entity.dxf.start, entity.dxf.end], parent_matrix, factor)},
@@ -455,7 +658,7 @@ def inspect_cad(path, source_units="mm"):
         "scale_to_mm": factor, "objects": objects, "bounds": bounds,
         "bounds_scope": "Sampled extracted geometry, not a conservative solid envelope",
         "warnings": warnings, "routes": [], "axis_candidates": candidates,
-        "route_candidates": _candidate_chains(candidates),
+        "route_candidates": _candidate_chains(candidates), "solid_envelopes": solid_envelopes,
         "counts": dict(counts), "unsupported_geometry": dict(unsupported),
         "pipe_graph_ready": False, "compliance_verified": False,
     }

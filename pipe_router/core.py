@@ -12,6 +12,8 @@ import itertools
 import math
 from typing import Any
 
+from . import collision
+
 
 Point = tuple[float, float, float]
 Index = tuple[int, int, int]
@@ -20,6 +22,8 @@ EPSILON = 1e-8
 MAX_ABSOLUTE_VALUE = 1e12
 MAX_ROUTE_POINTS = 10_000
 MAX_OBSTACLES = 256
+MAX_CAPSULES_PER_OBSTACLE = 512
+MAX_TOTAL_CAPSULES = 8192
 MAX_AXIS_COORDINATES = 500
 MAX_GRID_NODES = 150_000
 MAX_EXPANDED_STATES = 600_000
@@ -28,8 +32,8 @@ DIRECTIONS = ((0, -1), (0, 1), (1, -1), (1, 1), (2, -1), (2, 1))
 LIMITATIONS = [
     "Synthetic test layout only. No supplied CAD model has been imported.",
     "Clearance and other rule values are demo assumptions, not official standards.",
-    "A route is checked against the supplied boxes only. Missing obstacles cannot be checked.",
-    "Inflated boxes conservatively approximate pipe clearance and can reject a physically possible route.",
+    "A route is checked against the supplied obstacle envelopes only. Missing obstacles cannot be checked.",
+    "Boxes and capsule unions approximate source geometry and can reject a physically possible route.",
     "This version routes one pressurized pipe. Drain slope and other piping systems are unsupported.",
     "Sharp centerline corners do not model standard fittings, bend radius, supports, or connection orientation.",
     "The search optimizes a finite orthogonal grid. It does not establish the best possible continuous route.",
@@ -42,6 +46,7 @@ class _Box:
     id: str
     minimum: Point
     maximum: Point
+    capsules: tuple[collision.Capsule, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,6 +99,58 @@ def _box(value: Any, label: str, identifier: str) -> _Box:
     return _Box(identifier, minimum, maximum)
 
 
+def _prepare_obstacle(record: dict, label: str, margin: float) -> _Box:
+    """Validate a source obstacle and apply moving pipe clearance once."""
+    record = _mapping(record, label)
+    margin = _number(margin, "obstacle margin")
+    if margin < 0:
+        raise ValueError("obstacle margin must be nonnegative")
+    identifier = record.get("id")
+    if not isinstance(identifier, str) or not identifier.strip():
+        raise ValueError("Every obstacle must have a nonempty string id")
+    box = _box(record, label, identifier)
+    capsules = []
+    if "capsules" in record:
+        items = record["capsules"]
+        if not isinstance(items, list) or not 1 <= len(items) <= MAX_CAPSULES_PER_OBSTACLE:
+            raise ValueError(f"{label}.capsules must contain 1 to {MAX_CAPSULES_PER_OBSTACLE} capsule records")
+        for index, item in enumerate(items):
+            prefix = f"{label}.capsules[{index}]"
+            item = _mapping(item, prefix)
+            start = _point(item.get("start"), f"{prefix}.start")
+            end = _point(item.get("end"), f"{prefix}.end")
+            radius = _number(item.get("radius"), f"{prefix}.radius", positive=True)
+            effective_min = tuple(min(a, b) - radius for a, b in zip(start, end))
+            effective_max = tuple(max(a, b) + radius for a, b in zip(start, end))
+            clip_min = clip_max = None
+            if "clip_min" in item or "clip_max" in item:
+                clip_min = _point(item.get("clip_min"), f"{prefix}.clip_min")
+                clip_max = _point(item.get("clip_max"), f"{prefix}.clip_max")
+                if any(low > high for low, high in zip(clip_min, clip_max)):
+                    raise ValueError(f"{prefix} must have clip_min <= clip_max on every axis")
+                effective_min = tuple(max(a, b) for a, b in zip(effective_min, clip_min))
+                effective_max = tuple(min(a, b) for a, b in zip(effective_max, clip_max))
+                if any(low > high for low, high in zip(effective_min, effective_max)):
+                    raise ValueError(f"{prefix} clipping bounds do not overlap its capsule envelope")
+            if any(
+                effective_min[axis] < box.minimum[axis] - EPSILON
+                or effective_max[axis] > box.maximum[axis] + EPSILON
+                for axis in range(3)
+            ):
+                raise ValueError(f"{prefix} envelope must fit inside its obstacle min/max bounds")
+            capsules.append(collision.Capsule(
+                start, end, radius + margin,
+                tuple(value - margin for value in clip_min) if clip_min is not None else None,
+                tuple(value + margin for value in clip_max) if clip_max is not None else None,
+            ))
+    return _Box(
+        box.id,
+        tuple(value - margin for value in box.minimum),
+        tuple(value + margin for value in box.maximum),
+        tuple(capsules),
+    )
+
+
 def _prepare_layout(layout: dict) -> _Layout:
     layout = _mapping(layout, "layout")
     if layout.get("provenance") != "synthetic":
@@ -125,7 +182,7 @@ def _prepare_layout(layout: dict) -> _Layout:
 
     obstacle_records = layout.get("obstacles")
     if not isinstance(obstacle_records, list) or len(obstacle_records) > MAX_OBSTACLES:
-        raise ValueError(f"obstacles must be a list with at most {MAX_OBSTACLES} boxes")
+        raise ValueError(f"obstacles must be a list with at most {MAX_OBSTACLES} obstacles")
     obstacles = []
     identifiers = set()
     for number, record in enumerate(obstacle_records):
@@ -134,12 +191,9 @@ def _prepare_layout(layout: dict) -> _Layout:
         if not isinstance(identifier, str) or not identifier.strip() or identifier in identifiers:
             raise ValueError("Every obstacle must have a unique nonempty string id")
         identifiers.add(identifier)
-        box = _box(record, f"obstacles[{number}]", identifier)
-        obstacles.append(_Box(
-            box.id,
-            tuple(value - margin for value in box.minimum),
-            tuple(value + margin for value in box.maximum),
-        ))
+        obstacles.append(_prepare_obstacle(record, f"obstacles[{number}]", margin))
+    if sum(len(obstacle.capsules) for obstacle in obstacles) > MAX_TOTAL_CAPSULES:
+        raise ValueError(f"obstacles must contain at most {MAX_TOTAL_CAPSULES} capsules in total")
     assumptions = layout.get("assumptions", [])
     if not isinstance(assumptions, list) or not all(isinstance(item, str) for item in assumptions):
         raise ValueError("assumptions must be a list of strings")
@@ -154,22 +208,27 @@ def _inside(point: Point, box: _Box) -> bool:
 
 
 def _segment_intersects_box(start: Point, end: Point, box: _Box) -> bool:
-    """Closed slab intersection. A tangent or corner touch counts as a clash."""
-    enter, leave = 0.0, 1.0
-    for axis in range(3):
-        delta = end[axis] - start[axis]
-        low, high = box.minimum[axis] - EPSILON, box.maximum[axis] + EPSILON
-        if delta == 0:
-            if not low <= start[axis] <= high:
-                return False
-            continue
-        t1, t2 = (low - start[axis]) / delta, (high - start[axis]) / delta
-        if t1 > t2:
-            t1, t2 = t2, t1
-        enter, leave = max(enter, t1), min(leave, t2)
-        if enter > leave:
-            return False
-    return True
+    """Continuous closed obstacle check with optional capsule refinement."""
+    if collision.segment_box_interval(start, end, box.minimum, box.maximum, tolerance=EPSILON) is None:
+        return False
+    return not box.capsules or any(
+        collision.segment_intersects_capsule(start, end, capsule, tolerance=EPSILON)
+        for capsule in box.capsules
+    )
+
+
+def _segment_obstacle_intervals(start: Point, end: Point, box: _Box) -> list[tuple[float, float]]:
+    """Return every continuous contact interval for boxes or capsule unions."""
+    broad_interval = collision.segment_box_interval(start, end, box.minimum, box.maximum, tolerance=EPSILON)
+    if broad_interval is None:
+        return []
+    if not box.capsules:
+        return [broad_interval]
+    return collision.merge_intervals([
+        interval
+        for capsule in box.capsules
+        for interval in collision.segment_capsule_intervals(start, end, capsule, tolerance=EPSILON)
+    ])
 
 
 def _direction(start: Point, end: Point) -> int | None:
@@ -275,12 +334,15 @@ def _search(prepared: _Layout) -> tuple[list[Point] | None, dict]:
     if not _inside(prepared.start, prepared.interior) or not _inside(prepared.end, prepared.interior):
         summary["reason"] = "A fixed endpoint does not fit inside the supplied bounds"
         return None, summary
-    if any(
-        _segment_intersects_box(point, point, obstacle)
-        for point in (prepared.start, prepared.end)
+    blocked = [
+        {"endpoint": endpoint, "point": list(point), "obstacle": obstacle.id}
+        for endpoint, point in (("start", prepared.start), ("end", prepared.end))
         for obstacle in prepared.obstacles
-    ):
+        if _segment_intersects_box(point, point, obstacle)
+    ]
+    if blocked:
         summary["reason"] = "A fixed endpoint touches an obstacle or its demo clearance"
+        summary["blocked_endpoints"] = blocked
         return None, summary
 
     coordinates = [_axis_coordinates(prepared, axis) for axis in range(3)]

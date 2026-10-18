@@ -62,6 +62,28 @@ def _solid_boxes(cad):
                 record["max"][axis] = max(record["max"][axis], point[axis])
         record["source_object_count"] += 1
         record["source_point_count"] += len(points)
+    envelopes = {}
+    for record in cad.get("solid_envelopes", []):
+        key = _instance_key(record.get("source_handle"), record.get("instance_path", []), "Solid envelope")
+        if key in envelopes:
+            raise ValueError("Duplicate solid envelope identity. Reimport the drawing")
+        envelopes[key] = record
+        # A complete analytic envelope can exist without any display mesh.
+        # Keep that component in the collision input rather than losing it.
+        if key not in groups and record.get("eligible") is True:
+            capsules = record.get("capsules")
+            if not isinstance(capsules, list) or not 1 <= len(capsules) <= 256:
+                raise ValueError("Invalid supported solid envelope. Reimport the drawing")
+            lows, highs = [], []
+            for capsule in capsules:
+                radius = core._number(capsule.get("radius"), "capsule radius", positive=True)
+                for name in ("start", "end"):
+                    point = core._point(capsule.get(name), "capsule endpoint")
+                    lows.append([v - radius for v in point])
+                    highs.append([v + radius for v in point])
+            groups[key] = {"min": [min(p[i] for p in lows) for i in range(3)],
+                           "max": [max(p[i] for p in highs) for i in range(3)],
+                           "source_object_count": 0, "source_point_count": 0}
     boxes = []
     for index, (key, record) in enumerate(groups.items()):
         low, high = list(record["min"]), list(record["max"])
@@ -72,11 +94,37 @@ def _solid_boxes(cad):
                 low[axis] = midpoint - THIN_BOX_PADDING_MM / 2
                 high[axis] = midpoint + THIN_BOX_PADDING_MM / 2
                 padded_axes.append(axis)
-        boxes.append({
+        box = {
             "id": f"cad-solid-{index + 1}", "key": key, "min": low, "max": high,
             **_instance_record(key), "source_object_count": record["source_object_count"],
             "source_point_count": record["source_point_count"], "thin_axes_padded": padded_axes,
-        })
+            "obstacle_method": "sample_box",
+            "geometry_note": "No complete supported surface envelope. Using the extracted sample box",
+        }
+        envelope = envelopes.get(key, {})
+        if envelope.get("eligible") is True:
+            capsules = deepcopy(envelope.get("capsules"))
+            if not isinstance(capsules, list) or not 1 <= len(capsules) <= 256:
+                raise ValueError("Invalid supported solid envelope. Reimport the drawing")
+            for capsule in capsules:
+                radius = core._number(capsule.get("radius"), "capsule radius", positive=True)
+                a = core._point(capsule.get("start"), "capsule start")
+                b = core._point(capsule.get("end"), "capsule end")
+                cap_low = [min(a[i], b[i]) - radius for i in range(3)]
+                cap_high = [max(a[i], b[i]) + radius for i in range(3)]
+                if "clip_min" in capsule and "clip_max" in capsule:
+                    clip_low = core._point(capsule["clip_min"], "capsule clip_min")
+                    clip_high = core._point(capsule["clip_max"], "capsule clip_max")
+                    cap_low = [max(a, b) for a, b in zip(cap_low, clip_low)]
+                    cap_high = [min(a, b) for a, b in zip(cap_high, clip_high)]
+                for axis in range(3):
+                    low[axis] = min(low[axis], cap_low[axis])
+                    high[axis] = max(high[axis], cap_high[axis])
+            box.update(capsules=capsules, obstacle_method="supported_surface_capsules",
+                       geometry_note=envelope.get("reason", "Complete supported surface envelopes"))
+        elif envelope.get("reason"):
+            box["geometry_note"] = envelope["reason"]
+        boxes.append(box)
     return boxes, {"explicit_curve_objects_unchecked": explicit_curves,
                    "solid_geometry_objects_unread": unread_geometry_objects}
 
@@ -90,12 +138,13 @@ def _endpoint_contacts(points, boxes, envelope):
     contacts = []
     for label, point in (("start", points[0]), ("end", points[-1])):
         for box in boxes:
-            if all(box["min"][axis] - envelope <= point[axis] <= box["max"][axis] + envelope
-                   for axis in range(3)):
+            shape = core._prepare_obstacle(box, "CAD obstacle", envelope)
+            if core._segment_intersects_box(tuple(point), tuple(point), shape):
                 contacts.append({
                     "endpoint": label, "obstacle_id": box["id"],
                     "source_handle": box["source_handle"], "instance_path": list(box["instance_path"]),
-                    "scope": "Inside the source solid sample box expanded by pipe radius and clearance",
+                    "scope": "Inside the component envelope expanded by pipe radius and clearance",
+                    "obstacle_method": box["obstacle_method"],
                 })
     return contacts
 
@@ -181,7 +230,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
             f"This local region contains {len(nearby)} obstacle solids. The tester supports at most "
             f"{core.MAX_OBSTACLES}. Reduce search padding or choose a shorter candidate run. No obstacles were dropped."
         )
-    obstacles = [{"id": box["id"], "min": list(box["min"]), "max": list(box["max"])} for box in nearby]
+    obstacles = [{"id": box["id"], "min": list(box["min"]), "max": list(box["max"]),
+                  **({"capsules": deepcopy(box["capsules"])} if "capsules" in box else {})} for box in nearby]
     contacts = _endpoint_contacts(points, nearby, envelope)
     declared_solids = cad.get("counts", {}).get("solid_instances")
     missing = max(0, declared_solids - len(all_boxes)) if isinstance(declared_solids, int) else None
@@ -189,6 +239,7 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         "Selected candidate identity, nominal size and equipment ports remain unverified. A candidate may be a fitting or fastener.",
         "The rectangular search region is an assumed local test box. It is not the ship boundary or an approved routing space.",
         "Obstacle boxes conservatively enclose extracted samples and mesh triangles. They can block empty space inside curved components.",
+        "Fully supported surfaces use conservative pipe-shaped envelopes. Ambiguous torus bends use the whole ring. Unknown or partial solids keep their sample boxes.",
         "Unsupported and missing source geometry remains unchecked. These boxes do not establish complete solid geometry or ship clearance.",
         "Neighboring components and connectors remain obstacles. Endpoint contacts need designer review rather than automatic removal.",
         "The inferred diameter and selected rule values are provisional. No fitting catalog or engineering standard is verified.",
@@ -216,6 +267,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         "selected_source_instances": len(excluded),
         "excluded_selected_source_objects": sum(box["source_object_count"] for box in excluded),
         "nearby_obstacles": len(nearby), "checked_obstacles": len(obstacles),
+        "pipe_shaped_obstacles": sum("capsules" in box for box in nearby),
+        "fallback_box_obstacles": sum("capsules" not in box for box in nearby),
         "outside_local_bounds": len(all_boxes) - len(excluded) - len(nearby),
         "endpoint_contacts": len(contacts), **extra_counts,
     }
@@ -226,7 +279,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         "obstacle_count": len(obstacles), "source_counts": deepcopy(cad.get("counts", {})),
         "source_sha256": cad.get("source_sha256"), "source_units": cad.get("source_units"),
         "source_unit_assumption": cad.get("unit_assumption"),
-        "geometry_origin": "full_extracted_geometry", "obstacle_method": "aabb_of_extracted_samples",
+        "geometry_origin": "full_extracted_geometry",
+        "obstacle_method": "supported_surface_capsules_with_box_fallback" if any("capsules" in box for box in nearby) else "aabb_of_extracted_samples",
         "bounds_scope": "assumed_local_search_box", "ship_boundary_verified": False,
         "complete_ship_geometry": False, "semantic_pipe_size_verified": False,
         "connectivity_verified": False, "source_geometry_edited": False,
@@ -241,6 +295,7 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         "counts": counts,
         "obstacle_sources": [{key: deepcopy(box[key]) for key in (
             "id", "source_handle", "instance_path", "source_object_count", "source_point_count", "thin_axes_padded",
+            "obstacle_method", "geometry_note",
         )} for box in nearby],
         "endpoint_contacts": contacts, "unsupported_geometry": deepcopy(cad.get("unsupported_geometry", {})),
         "source_warnings": list(cad.get("warnings", [])), "warnings": warnings,

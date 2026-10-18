@@ -5,12 +5,13 @@ import hashlib
 from pathlib import Path
 import subprocess
 import sys
+import shutil
 
 import ezdxf
 import pytest
 
 from pipe_router.workflow import run_workflow
-from scripts.run_demo import make_figure, write_html
+from scripts.run_demo import capsule_mesh, diagnostic_text, make_figure, write_dxf, write_html
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -253,3 +254,182 @@ def test_shared_results_and_cad_export_match_the_reproducible_demo():
     assert [list(point) for point in fixed[0].points()] == report["layout"]["protected_endpoints"][0]["points"]
     notes = " ".join(entity.dxf.text for entity in document.modelspace().query("TEXT"))
     assert "CONTROLLED DETOUR TEST" in notes
+
+
+def envelope_layout(units="mm"):
+    layout = review_layout(provenance="cad-derived", units=units)
+    layout["obstacles"] = [{
+        "id": "bent-neighbor", "min": [0, 0, 0], "max": [100, 100, 100],
+        "capsules": [{"start": [50, 50, 30], "end": [50, 50, 70], "radius": 5}],
+    }]
+    return layout
+
+
+def test_capsule_export_and_plot_use_scaled_envelopes_not_their_broad_boxes(tmp_path):
+    layout = envelope_layout(units="in")
+    result = run_workflow(layout)
+    assert result["original"]["valid"]
+    figure = make_figure(layout, result)
+    envelope = next(trace for trace in figure.data if trace.meta and trace.meta.get("obstacle_id") == "bent-neighbor")
+    assert envelope.legendgroup == "pipe-envelopes"
+    assert min(envelope.x) == pytest.approx(45*25.4)
+    assert max(envelope.x) == pytest.approx(55*25.4)
+    assert min(envelope.z) == pytest.approx(25*25.4)
+    assert max(envelope.z) == pytest.approx(75*25.4)
+    assert not any(trace.legendgroup == "box-envelopes" for trace in figure.data)
+    path = tmp_path / "envelopes.dxf"
+    write_dxf(layout, result, path)
+    doc = ezdxf.readfile(path)
+    assert not doc.audit().errors
+    assert not list(doc.modelspace().query('POLYLINE[layer=="CAD_DERIVED_OBSTACLE"]'))
+    axes = list(doc.modelspace().query('LINE[layer=="CAD_DERIVED_ENVELOPE_AXES"]'))
+    assert len(axes) == 1
+    assert list(axes[0].dxf.start) == pytest.approx([1270, 1270, 762])
+    assert list(axes[0].dxf.end) == pytest.approx([1270, 1270, 1778])
+    notes = " ".join(item.dxf.text for item in doc.modelspace().query('TEXT'))
+    assert "Radius 127 mm" in notes
+    assert "Not a pipe centerline" in notes
+
+
+def test_spherical_envelope_mesh_and_dxf_handle_zero_length_axis(tmp_path):
+    layout = envelope_layout()
+    layout["obstacles"][0]["capsules"][0]["end"] = [50, 50, 30]
+    result = run_workflow(layout)
+    vertices, faces = capsule_mesh(layout["obstacles"][0]["capsules"])
+    assert all(0 <= index < len(vertices) for face in faces for index in face)
+    assert min(point[2] for point in vertices) == pytest.approx(25)
+    assert max(point[2] for point in vertices) == pytest.approx(35)
+    path = tmp_path / "sphere.dxf"
+    write_dxf(layout, result, path)
+    doc = ezdxf.readfile(path)
+    assert not doc.audit().errors
+    assert len(list(doc.modelspace().query('POINT[layer=="CAD_DERIVED_ENVELOPE_AXES"]'))) == 1
+
+
+def test_report_explains_mixed_geometry_and_escapes_source_diagnostics(tmp_path):
+    layout = envelope_layout()
+    layout["obstacles"].append({"id": "unknown-equipment", "min": [80, 80, 80], "max": [90, 90, 90]})
+    layout["cad_context"] = {"counts": {
+        "solid_instances_without_extracted_geometry": 3, "explicit_curve_objects_unchecked": 5,
+    }}
+    result = run_workflow(layout)
+    result["diagnostics"] = [{
+        "message": "Review <img src=x onerror=alert(1)>", "stage": "movable_start",
+        "point": [10, 10, 50], "obstacle": "bent-neighbor", "source_handle": "DD7",
+        "instance_path": ["BLOCK[0]"], "obstacle_method": "pipe_envelope",
+    }]
+    path = tmp_path / "report.html"
+    write_html(layout, result, .1, path)
+    page = path.read_text()
+    assert "1 use pipe-shaped envelopes. 1 use box envelopes" in page
+    assert "3 source solid instances have no extracted geometry" in page
+    assert "5 explicit curve objects are not collision obstacles" in page
+    assert "Sampled direction changes (not fittings)" in page
+    assert "What stopped the search" in page
+    assert "source DD7 in BLOCK[0]" in page
+    assert "point 10, 10, 50 mm" in page
+    assert "<img src=x onerror=alert(1)>" not in page
+    assert "&lt;img src=x onerror=alert(1)&gt;" in page
+    assert "Broad search boxes for these objects are not shown as occupied space" in page
+
+
+@pytest.mark.parametrize("clipped", [False, True])
+def test_browser_preview_scales_capsules_and_matches_plot_envelope(clipped):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is needed to execute browser preview functions")
+    code = r'''
+const fs = require('node:fs')
+const vm = require('node:vm')
+const input = JSON.parse(fs.readFileSync(0, 'utf8'))
+const code = fs.readFileSync('web/app.js', 'utf8').replace(/init\(\)\.catch\([^\n]+\)\s*$/, '')
+const nodes = new Map()
+let rendered
+const document = {getElementById(id) { if (!nodes.has(id)) nodes.set(id, {textContent: '', checked: false}); return nodes.get(id) }}
+const context = vm.createContext({structuredClone, console, document, Plotly: {react(element,traces,layout) {rendered = {traces,layout}}}})
+vm.runInContext(code, context)
+context.input = input
+const preview = vm.runInContext('normalizedPreview(input)', context)
+context.preview = preview
+const geometry = vm.runInContext('capsuleMesh(preview.obstacles[0].capsules)', context)
+vm.runInContext('drawRoute(preview)', context)
+const diagnostic = vm.runInContext('diagnosticText({message: "Touches obstacle box-1 (source DD7)", obstacle: "box-1", source_handle: "DD7", instance_path: ["BLOCK[0]"]})', context)
+console.log(JSON.stringify({preview, geometry, original: input, rendered, diagnostic}))
+'''
+    layout = envelope_layout(units="in")
+    if clipped:
+        layout["obstacles"][0]["capsules"][0].update({"clip_min": [46,46,30], "clip_max": [54,54,70]})
+    another = json.loads(json.dumps(layout["obstacles"][0]))
+    another["id"] = "second-neighbor"
+    layout["obstacles"].append(another)
+    layout["obstacles"].extend([
+        {"id": name, "min": [80,80,80], "max": [90,90,90]} for name in ("box-1", "box-2")
+    ])
+    layout["protected_endpoints"] = [{"endpoint": "start", "points": [[10,10,50], [12,10,50]], "max_distance": 2}]
+    completed = subprocess.run([node, "-e", code], cwd=ROOT, input=json.dumps(layout), capture_output=True, text=True, check=True)
+    data = json.loads(completed.stdout)
+    capsule = data["preview"]["obstacles"][0]["capsules"][0]
+    assert capsule["radius"] == pytest.approx(127)
+    assert capsule["start"] == pytest.approx([1270, 1270, 762])
+    if clipped:
+        assert capsule["clip_min"] == pytest.approx([1168.4,1168.4,762])
+        assert capsule["clip_max"] == pytest.approx([1371.6,1371.6,1778])
+    assert data["preview"]["units"] == "mm"
+    assert data["preview"]["protected_endpoints"][0]["points"][1] == pytest.approx([304.8, 254, 1270])
+    assert data["preview"]["rules"]["clearance"] == pytest.approx(76.2)
+    assert data["original"] == layout
+    vertices, faces = capsule_mesh([capsule])
+    assert data["geometry"]["triangles"] == [list(face) for face in faces]
+    for actual, expected in zip(data["geometry"]["vertices"], vertices):
+        assert actual == pytest.approx(expected)
+    legend = [trace["name"] for trace in data["rendered"]["traces"] if trace.get("legendgroup") in ("pipe-envelopes", "box-envelopes") and trace["showlegend"]]
+    assert legend == ["Pipe envelopes", "Box envelopes"]
+    assert data["rendered"]["layout"]["legend"]["groupclick"] == "togglegroup"
+    assert "second-neighbor" in next(trace for trace in data["rendered"]["traces"] if trace.get("meta", {}).get("obstacle_id") == "second-neighbor")["hovertemplate"]
+    assert data["diagnostic"].count("source DD7") == 1
+    assert "BLOCK[0]" in data["diagnostic"]
+
+
+def test_clipped_capsule_display_omits_round_ends_and_labels_dxf_bounds(tmp_path):
+    layout = envelope_layout()
+    capsule = layout["obstacles"][0]["capsules"][0]
+    capsule.update({"clip_min": [46,46,30], "clip_max": [54,54,70]})
+    vertices, faces = capsule_mesh([capsule])
+    assert faces
+    for point in vertices:
+        assert all(low-1e-9 <= value <= high+1e-9 for value, low, high in zip(point, capsule["clip_min"], capsule["clip_max"]))
+    assert min(point[2] for point in vertices) == pytest.approx(30)
+    assert max(point[2] for point in vertices) == pytest.approx(70)
+    result = run_workflow(layout)
+    path = tmp_path / "clipped.dxf"
+    write_dxf(layout, result, path)
+    document = ezdxf.readfile(path)
+    assert not document.audit().errors
+    labels = " ".join(item.dxf.text for item in document.modelspace().query('TEXT'))
+    assert "Clip bounds 46, 46, 30 to 54, 54, 70 mm" in labels
+
+
+def test_obstacle_legend_groups_keep_source_hover_and_route_entries():
+    layout = envelope_layout()
+    another = json.loads(json.dumps(layout["obstacles"][0]))
+    another["id"] = "second-neighbor"
+    layout["obstacles"].append(another)
+    layout["obstacles"].extend([
+        {"id": name, "min": [80,80,80], "max": [90,90,90]} for name in ("box-1", "box-2")
+    ])
+    layout["cad_context"] = {"obstacle_sources": [{"id": "second-neighbor", "source_handle": "DD7", "instance_path": ["BLOCK[0]"]}]}
+    result = run_workflow(layout)
+    figure = make_figure(layout, result)
+    obstacles = [trace for trace in figure.data if trace.legendgroup in ("pipe-envelopes", "box-envelopes")]
+    assert len(obstacles) == 4
+    assert [trace.name for trace in obstacles if trace.showlegend] == ["Pipe envelopes", "Box envelopes"]
+    assert figure.layout.legend.groupclick == "togglegroup"
+    hover = next(trace.hovertemplate for trace in obstacles if trace.meta["obstacle_id"] == "second-neighbor")
+    assert "second-neighbor" in hover
+    assert "Source DD7" in hover
+    assert "BLOCK[0]" in hover
+    assert any(trace.name == "Original route" and trace.showlegend is not False for trace in figure.data)
+    text = diagnostic_text({"message": "Touches obstacle box-1 (source DD7)", "source_handle": "DD7", "obstacle": "box-1", "instance_path": ["BLOCK[0]"]})
+    assert text.count("source DD7") == 1
+    assert text.count("box-1") == 1
+    assert "BLOCK[0]" in text

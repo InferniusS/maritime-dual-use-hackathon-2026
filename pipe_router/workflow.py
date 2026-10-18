@@ -64,6 +64,18 @@ def normalize_layout(layout: dict) -> dict:
         core._mapping(obstacle, f"obstacles[{i}]")
         for key in ("min", "max"):
             obstacle[key] = point(obstacle.get(key), f"obstacles[{i}].{key}")
+        if "capsules" in obstacle:
+            capsules = obstacle["capsules"]
+            if not isinstance(capsules, list) or not 1 <= len(capsules) <= 256:
+                raise ValueError("A pipe obstacle needs 1 to 256 capsule envelopes")
+            for capsule in capsules:
+                core._mapping(capsule, "obstacle capsule")
+                for key in ("start", "end"):
+                    capsule[key] = point(capsule.get(key), f"capsule.{key}")
+                for key in ("clip_min", "clip_max"):
+                    if key in capsule:
+                        capsule[key] = point(capsule[key], f"capsule.{key}")
+                capsule["radius"] = core._number(capsule.get("radius"), "capsule.radius", positive=True) * scale
     rules = core._mapping(result.setdefault("rules", {}), "rules")
     for key in (*DEFAULT_RULES_MM, "bend_radius"):
         if key in rules:
@@ -110,7 +122,8 @@ def normalize_layout(layout: dict) -> dict:
         margin = pipe["diameter"] / 2 + rules["clearance"]
         for identifier in identifiers:
             obstacle = next(item for item in obstacles if item["id"] == identifier)
-            if not all(low - margin <= value <= high + margin for value, low, high in zip(origin, obstacle["min"], obstacle["max"])):
+            shape = core._prepare_obstacle(obstacle, "endpoint obstacle", margin)
+            if not core._segment_intersects_box(tuple(origin), tuple(origin), shape):
                 raise ValueError("An endpoint connection assumption must refer to an obstacle that touches that endpoint")
     protected_segments = sum(len(record["points"]) - 1 for record in protected)
     if protected and protected_segments >= len(pipe["original_route"]) - 1:
@@ -123,22 +136,6 @@ def normalize_layout(layout: dict) -> dict:
 
 def _core_adapter(layout: dict) -> dict:
     return {**layout, "provenance": "synthetic", "system_type": "pressurized"}
-
-
-def _segment_box_interval(start, end, box):
-    enter, leave = 0.0, 1.0
-    for axis in range(3):
-        delta = end[axis] - start[axis]
-        low, high = box.minimum[axis], box.maximum[axis]
-        if delta == 0:
-            if not low <= start[axis] <= high:
-                return None
-            continue
-        a, b = (low - start[axis]) / delta, (high - start[axis]) / delta
-        enter, leave = max(enter, min(a, b)), min(leave, max(a, b))
-        if enter > leave:
-            return None
-    return enter, leave
 
 
 def _route_at_distance(points, distance):
@@ -157,8 +154,7 @@ def _connection_exit_distance(points, boxes, maximum):
     for start, end in zip(points, points[1:]):
         length = math.dist(start, end)
         for box in boxes:
-            interval = _segment_box_interval(start, end, box)
-            if interval is not None:
+            for interval in core._segment_obstacle_intervals(start, end, box):
                 intervals.append((travelled + interval[0] * length, travelled + interval[1] * length))
         travelled += length
     end_of_contact = 0.0
@@ -205,7 +201,7 @@ def with_endpoint_connections(layout: dict, endpoint_connections: dict | None, m
             continue
         directed = original if endpoint == "start" else list(reversed(original))
         selected = [box_lookup[identifier] for identifier in dict.fromkeys(identifiers)]
-        if not all(core._inside(tuple(directed[0]), box) for box in selected):
+        if not all(core._segment_intersects_box(tuple(directed[0]), tuple(directed[0]), box) for box in selected):
             raise ValueError("Every selected endpoint connector must touch that original endpoint")
         distance = _connection_exit_distance(directed, selected, maximum)
         requests[endpoint] = {"distance": distance, "obstacle_ids": list(dict.fromkeys(identifiers))}
@@ -470,11 +466,11 @@ def _run_without_protected_search(layout: dict) -> dict:
         "Selected rules are an unverified prototype profile, not an official engineering standard.",
         "Pipe outer diameter and fixed endpoint positions are preserved. The supplied diameter is treated as outer diameter.",
         "Pipe radius plus selected clearance is applied to every obstacle and boundary face.",
-        "Closed inflated obstacle boxes include their interior. A pipe cannot be routed through a supplied pipe or duct exclusion box.",
+        "Obstacle envelopes include their interior. Supported surface capsules include the pipe radius and selected clearance. Other components keep their supplied exclusion boxes.",
     ])
     limitations = [
         "Passing the implemented checks does not establish compliance with engineering standards or fitness for installation.",
-        "Only the supplied obstacle boxes and rectangular boundary are checked. Missing structure, equipment, and other pipes remain unchecked.",
+        "Only the supplied obstacle envelopes and rectangular boundary are checked. Missing structure, equipment, and other pipes remain unchecked.",
         "One pipe is routed at a time. Branch connectivity, intermediate valves, simultaneous routing, supports, and connection orientation are not modeled.",
         "Standard commercially available fittings have not been selected or verified. A designer must review every bend and connection.",
         "No flow, pressure, structural, or full engineering compliance calculation is performed.",
@@ -521,12 +517,52 @@ def _run_without_protected_search(layout: dict) -> dict:
     }
 
 
+def _explain_obstacles(layout: dict, result: dict) -> dict:
+    """Attach source identity and distinguish a blocked anchor from a failed search."""
+    context = layout.get("cad_context", {})
+    sources = {item["id"]: item for item in context.get("obstacle_sources", [])} if isinstance(context, dict) else {}
+    shapes = {item["id"]: item for item in layout["obstacles"]}
+
+    def describe(record):
+        identifier = record.get("obstacle")
+        source = sources.get(identifier, {})
+        record["obstacle_method"] = "supported_surface_capsules" if "capsules" in shapes.get(identifier, {}) else "sample_box"
+        if source.get("source_handle"):
+            record["source_handle"] = source["source_handle"]
+            record["instance_path"] = source.get("instance_path", [])
+            if "message" in record:
+                record["message"] += f" (source {source['source_handle']})"
+        return record
+
+    for name in ("original", "candidate"):
+        if result.get(name):
+            for issue in result[name]["issues"]:
+                if issue.get("obstacle"):
+                    describe(issue)
+    blocked = [describe(dict(item)) for item in result["search"].get("blocked_endpoints", [])]
+    result["search"]["blocked_endpoints"] = blocked
+    result["checks"]["pipe_shaped_obstacles"] = sum("capsules" in item for item in layout["obstacles"])
+    result["checks"]["fallback_box_obstacles"] = sum("capsules" not in item for item in layout["obstacles"])
+    diagnostics = []
+    if result["status"] == "no_route" and blocked:
+        for item in blocked:
+            source = item.get("source_handle", item["obstacle"])
+            method = "pipe envelope" if item["obstacle_method"] == "supported_surface_capsules" else "obstacle box"
+            location = ", ".join(f"{value:.3f}" for value in item["point"])
+            endpoint = ("movable " if layout.get("protected_endpoints") else "fixed ") + item["endpoint"]
+            diagnostics.append({**item, "stage": "before_search", "code": "blocked_endpoint",
+                "message": f"Search did not start. The {endpoint} point at [{location}] mm touches the {method} for source {source}. Review that component and the selected clearance."})
+        result["search"]["reason"] += ". " + diagnostics[0]["message"]
+    result["diagnostics"] = diagnostics
+    return result
+
+
 def run_workflow(layout: dict) -> dict:
     """Run the route search while preserving any explicit endpoint stubs."""
     normalized = normalize_layout(layout)
     protected = normalized.get("protected_endpoints", [])
     if not protected:
-        return _run_without_protected_search(layout)
+        return _explain_obstacles(normalized, _run_without_protected_search(layout))
     original_points = normalized["pipe"]["original_route"]
     start_record = next((item for item in protected if item["endpoint"] == "start"), None)
     end_record = next((item for item in protected if item["endpoint"] == "end"), None)
@@ -563,10 +599,10 @@ def run_workflow(layout: dict) -> dict:
         "improved": "Found a checked replacement for the movable middle. The original endpoint stubs remain unchanged",
         "no_route": "No accepted full route was found by this search after preserving and validating the fixed endpoint stubs",
     }[status]
-    result["search"]["scope"] = "Only the movable middle is searched. All obstacle boxes remain active for that search"
+    result["search"]["scope"] = "Only the movable middle is searched. All obstacle boxes remain active as broad bounds and fallbacks. Supported pipe envelopes supply the detailed check"
     context = normalized.get("cad_context", {})
     result["search"]["bounds_scope"] = context.get("bounds_scope", "supplied_rectangular_bounds") if isinstance(context, dict) else "supplied_rectangular_bounds"
     result["checks"]["protected_endpoint_stubs"] = True
     result["assumptions"].append("Only explicitly selected connector contacts on exact original endpoint stubs are exempted. The movable middle has no collision exemptions.")
     result["limitations"].append("Endpoint connector contact assumptions are user selections for this prototype. They do not verify equipment ports, fitting availability, or actual connectivity.")
-    return result
+    return _explain_obstacles(normalized, result)
