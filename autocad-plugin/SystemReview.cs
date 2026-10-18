@@ -145,7 +145,7 @@ public sealed partial class PreviewCommand
                 $"Cyan shows section {number}. Check both endpoints and the source components before continuing.", false, null, true)) return;
             try
             {
-                if (!ChooseSectionConnections(document, client, section, prepareRequest, layout, fingerprint, snapshotHash, out var prepared)) return;
+                if (!ChooseSectionConnections(document, client, section, prepareRequest, layout, fingerprint, snapshotHash, drawingScale, out var prepared)) return;
                 layout = prepared;
             }
             catch (InvalidOperationException exception)
@@ -199,7 +199,7 @@ public sealed partial class PreviewCommand
     }
 
     private static bool ChooseSectionConnections(Document document, HttpClient client, JsonObject section,
-        JsonObject prepareRequest, JsonObject layout, string fingerprint, string snapshotHash, out JsonObject prepared)
+        JsonObject prepareRequest, JsonObject layout, string fingerprint, string snapshotHash, double drawingScale, out JsonObject prepared)
     {
         prepared = layout;
         if (layout["cad_context"]?["endpoint_contacts"] is not JsonArray contacts || contacts.Count == 0) return true;
@@ -213,9 +213,17 @@ public sealed partial class PreviewCommand
         List<int> accepted;
         while (true)
         {
-            var answer = editor.GetString(new PromptStringOptions("\nIntended fixed contact numbers, comma separated; ALL only if every listed contact is intended; Enter for none: ") { AllowSpaces = true });
+            var answer = editor.GetString(new PromptStringOptions("\nEnter INSPECT 1 to locate contact 1 (or INSPECT 2, etc.). Intended fixed contact numbers, comma separated; ALL only if every listed contact is intended; Enter for none: ") { AllowSpaces = true });
             if (answer.Status == PromptStatus.None || answer.Status == PromptStatus.OK && string.IsNullOrWhiteSpace(answer.StringResult)) return true;
             if (answer.Status != PromptStatus.OK) return false;
+            var inspect = Regex.Match(answer.StringResult.Trim(), @"^INSPECT\s+(\d+)$", RegexOptions.IgnoreCase);
+            if (inspect.Success)
+            {
+                if (!int.TryParse(inspect.Groups[1].Value, out var contactNumber) || contactNumber < 1 || contactNumber > contacts.Count)
+                    editor.WriteMessage($"\nChoose a contact number from 1 to {contacts.Count}.");
+                else if (!InspectSectionContact(document, layout, contacts[contactNumber - 1]!, contactNumber, drawingScale)) return false;
+                continue;
+            }
             if (answer.StringResult.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase))
             {
                 accepted = Enumerable.Range(1, contacts.Count).ToList(); break;
@@ -242,6 +250,74 @@ public sealed partial class PreviewCommand
         prepared = RequiredLayout(PostJson(client, "/api/prepare-cad-layout", prepareRequest));
         VerifySnapshotContext(prepared, fingerprint, snapshotHash);
         return true;
+    }
+
+    private static bool InspectSectionContact(Document document, JsonObject layout, JsonNode contact, int number, double scale)
+    {
+        var editor = document.Editor;
+        var obstacle = (layout["obstacles"] as JsonArray)?.FirstOrDefault(item => item?["id"]?.GetValue<string>() == Text(contact, "obstacle_id"));
+        if (obstacle is null) throw new InvalidOperationException("The contact envelope is missing; refresh the scan before reviewing it.");
+        var minimum = ReadScanPoint(obstacle["min"], scale) ?? throw new InvalidOperationException("Missing contact bounds.");
+        var maximum = ReadScanPoint(obstacle["max"], scale) ?? throw new InvalidOperationException("Missing contact bounds.");
+        var endpoint = ReadScanPoint(layout["pipe"]?[Text(contact, "endpoint")], scale) ?? throw new InvalidOperationException("Missing contact endpoint.");
+        using var previousView = editor.GetCurrentView();
+        var manager = TransientManager.CurrentTransientManager;
+        var viewports = new IntegerCollection();
+        var lines = new List<Line>();
+        ObjectId highlighted = ObjectId.Null;
+        try
+        {
+            var handle = Text(contact, "source_handle");
+            var nested = contact["instance_path"] is JsonArray { Count: > 0 };
+            if (nested) handle = Regex.Match(contact["instance_path"]![0]?.GetValue<string>() ?? "", "^[a-fA-F0-9]+").Value;
+            if (long.TryParse(handle, System.Globalization.NumberStyles.AllowHexSpecifier, System.Globalization.CultureInfo.InvariantCulture, out var numeric))
+            {
+                using var transaction = document.Database.TransactionManager.StartOpenCloseTransaction();
+                try
+                {
+                    var id = document.Database.GetObjectId(false, new Handle(numeric), 0);
+                    var blocks = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+                    if (!id.IsNull && !id.IsErased && transaction.GetObject(id, OpenMode.ForRead) is Entity entity && entity.OwnerId == blocks[BlockTableRecord.ModelSpace])
+                    { entity.Highlight(); highlighted = id; }
+                }
+                catch (Autodesk.AutoCAD.Runtime.Exception) { }
+            }
+            var corners = Enumerable.Range(0, 8).Select(i => new Point3d(
+                (i & 1) == 0 ? minimum.X : maximum.X,
+                (i & 2) == 0 ? minimum.Y : maximum.Y,
+                (i & 4) == 0 ? minimum.Z : maximum.Z)).ToArray();
+            for (var i = 0; i < 8; i++)
+                foreach (var bit in new[] { 1, 2, 4 }) if ((i & bit) == 0) AddLine(corners[i], corners[i | bit], 2);
+            var size = Math.Max(25, Number(layout["pipe"]!, "diameter")) / scale;
+            foreach (var axis in new[] { Vector3d.XAxis, Vector3d.YAxis, Vector3d.ZAxis })
+                AddLine(endpoint - axis * size, endpoint + axis * size, 1);
+            FrameMeshReview(document, corners.Concat(new[] { endpoint }).ToArray());
+            editor.Regen();
+            editor.WriteMessage($"\nContact {number}: {Text(contact, "endpoint")}, source {Text(contact, "source_handle")}. Yellow box locates the component bounds; red cross marks the route endpoint. This is NOT a proposal or proof of a connection.\nEnvelope method: {contact["obstacle_method"]}. Contact can include clearance, not only physical overlap.");
+            if (nested) editor.WriteMessage("\nThe owning block is highlighted; the yellow box locates the particular nested component.");
+            if (highlighted.IsNull) editor.WriteMessage("\nSource highlighting unavailable. Only recorded bounds are shown; do not infer a verified connection from this box.");
+            var answer = editor.GetString(new PromptStringOptions("\nInspect the component. Press Enter to return to contact selection (nothing is accepted automatically): "));
+            return answer.Status is PromptStatus.OK or PromptStatus.None;
+        }
+        finally
+        {
+            foreach (var line in lines)
+            { try { manager.EraseTransient(line, viewports); } catch (Autodesk.AutoCAD.Runtime.Exception) { } line.Dispose(); }
+            if (!highlighted.IsNull)
+            {
+                using var transaction = document.Database.TransactionManager.StartOpenCloseTransaction();
+                try { if (!highlighted.IsErased && transaction.GetObject(highlighted, OpenMode.ForRead) is Entity entity) entity.Unhighlight(); }
+                catch (Autodesk.AutoCAD.Runtime.Exception) { }
+            }
+            editor.SetCurrentView(previousView);
+            editor.Regen();
+        }
+        void AddLine(Point3d start, Point3d end, short color)
+        {
+            var line = new Line(start, end) { ColorIndex = color };
+            if (manager.AddTransient(line, TransientDrawingMode.Main, 128, viewports)) lines.Add(line);
+            else line.Dispose();
+        }
     }
 
     private static JsonObject? WaitForSystemJob(Document document, JsonObject pending, string cadId, string snapshotHash)

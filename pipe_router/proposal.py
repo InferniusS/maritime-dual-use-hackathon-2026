@@ -141,6 +141,7 @@ def add_pipe_proposal(result):
         raise ValueError('proposal.bend_radius_mm cannot be smaller than the declared rules.bend_radius in millimeters')
     started = time.monotonic()
     original = result['original']
+    result['centerline_search'] = deepcopy(result.get('search', {}))
     try:
         baseline = plan_assembly(layout,original['points'],bend_radius_mm=radius)
     except ValueError as error:
@@ -167,6 +168,10 @@ def add_pipe_proposal(result):
             continue
         check = _validate_normalized(layout,points,allow_pressure_polyline=True)
         if not check['valid']:
+            for issue in check.get('issues', []):
+                finding = {**deepcopy(issue), 'status': 'fail', 'scope': 'candidate_validation'}
+                if len(diagnostics) < 8 and finding not in diagnostics:
+                    diagnostics.append(finding)
             continue
         try:
             assembly = plan_assembly(layout,points,bend_radius_mm=radius)
@@ -212,15 +217,28 @@ def add_pipe_proposal(result):
     else:
         assembly = {'status':'blocked','units':'mm','outer_diameter_mm':layout['pipe']['diameter'],
             'bend_radius_mm':radius,'catalog_verified':False,'components':[],'meshes':[],
-            'findings':diagnostics or baseline.get('findings',[]), 'metrics':{}, 'change_type':'no_rounded_proposal'}
+            'findings':diagnostics, 'metrics':{}, 'change_type':'no_rounded_proposal'}
         result['candidate']=None
         result['status']='no_route'
-        result['search']['reason']='No rounded pipe proposal passed this bounded search. A centerline alone is not accepted as a physical pipe proposal.'
+        reason = 'No rounded pipe proposal passed this bounded search. A centerline alone is not accepted as a physical pipe proposal.'
+        blocked = result['centerline_search'].get('blocked_endpoints', [])
+        if blocked:
+            contacts = ', '.join(dict.fromkeys(
+                str(item['endpoint']) + ': ' + str(item['obstacle']) for item in blocked))
+            reason = ('The centerline search could not start because fixed endpoints touch obstacle envelopes '
+                      '(' + contacts + '). Verify intended connections and clearance. ' + reason)
+        result['search']['reason'] = reason
     assembly['reference_meshes']=reference
     assembly['reference_representation'] = 'rounded_baseline' if baseline['status']=='ready' and layout['provenance']=='synthetic' else 'unfitted_polyline'
     if reference_warning:
         assembly['findings'].append({'code':'reference_unavailable','status':'needs_review','message':reference_warning})
     assembly['baseline_status']=baseline['status']
+    # Reconstruction failures describe our interpretation of the reference, not
+    # a verified defect in the source CAD or the cause of candidate rejection.
+    assembly['baseline_findings'] = [
+        {**deepcopy(finding), 'scope': 'baseline_reconstruction'}
+        for finding in baseline.get('findings', [])
+    ]
     assembly['search']={'evaluated_candidates':evaluated,'limit_reached':limited,
         'elapsed_seconds':round(time.monotonic()-started,3),'max_candidates':MAX_ALTERNATIVES}
     result['assembly']=assembly

@@ -147,3 +147,27 @@ def test_explicit_bend_rule_is_not_overridden_by_3d_default():
     assert result['assembly']['bend_radius_mm']==500
     layout['proposal']['bend_radius_mm']=304.8
     with pytest.raises(ValueError,match='cannot be smaller'):run_workflow(layout)
+
+
+def test_blocked_endpoint_does_not_report_reference_tangent_failure_as_cause():
+    layout = case('05-already-good.json')
+    layout.pop('protected_endpoints')
+    layout['pipe']['original_route'] = [
+        [600,1200,1000], [600,1600,1000], [610,1610,1000],
+        [620,1615,1000], [9400,1615,1000], [9400,1200,1000]]
+    layout['obstacles'] = [{'id':'unverified-connector',
+                            'min':[500,1100,900], 'max':[700,1300,1100]}]
+    result = run_workflow(layout)
+    assert result['status'] == 'no_route'
+    assert result['candidate'] is None
+    assert result['assembly']['meshes'] == []
+    assert result['centerline_search']['expanded_states'] == 0
+    assert 'unverified-connector' in result['search']['reason']
+    assert 'could not start' in result['search']['reason']
+    assert any(f['code'] == 'assembly_insufficient_tangent_length'
+               for f in result['assembly']['baseline_findings'])
+    assert not any(f['code'] == 'assembly_insufficient_tangent_length'
+                   for f in result['assembly']['findings'])
+    assert any(f['code'] == 'obstacle_collision'
+               for f in result['assembly']['findings'])
+    assert not result['normalized_layout'].get('protected_endpoints')

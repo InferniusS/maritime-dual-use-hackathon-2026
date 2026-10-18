@@ -4,6 +4,14 @@ Audit baseline: commit `b180f9140b841f433c075e5961a812303314794f`, 18 October 20
 
 ### Changes after the baseline audit
 
+- **SYS-08 / OUT-05 contact review:** coordinated optimization now supports
+  `INSPECT <number>` with source highlighting, instance bounds, endpoint markers
+  and camera restoration. Inspection does not declare a connection. The rounded
+  search preserves its centerline-search diagnosis and separates reference
+  reconstruction findings from candidate rejection. A blocked sampled-curve
+  regression and replay of the supplied result confirm the diagnosis. Native
+  contact inspection still requires rehearsal; SYS-04 connectivity remains open.
+
 - **SYS-03 / SYS-08:** `MARITIMESCAN` inventories and screens every supported
   inferred section, with stable global numbers, progress, cancellation and
   all-row HTML/Excel output. `MARITIMEFIND` locates actual source objects,
