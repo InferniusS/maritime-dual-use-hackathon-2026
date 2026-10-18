@@ -87,6 +87,109 @@ def _simplify(points):
     return reduced
 
 
+# This is a conservative recognition tolerance for sampled source geometry,
+# not a fabrication tolerance or an allowance to change protected connections.
+SAMPLED_ARC_FIT_TOLERANCE_MM = 0.001
+MAX_SAMPLED_ARC_WORK = 50_000
+
+
+def reconstruct_sampled_arcs(points, protected_endpoints=()):
+    """Recognize finely sampled circular arcs between tangent straight runs.
+
+    Return sharp construction vertices as a *proposal seed*, never an accepted
+    original assembly. Each recognized arc needs at least five coplanar,
+    concyclic points, consistent turns no larger than 30 degrees, and tangent
+    straight runs at both ends. The caller still uses the requested bend radius
+    and independently validates the resulting physical assembly. Observed arc
+    radii do not establish a nominal size, fitting count or catalogue identity.
+    """
+    route = _points(points)
+    protected_indices = set()
+    for record in protected_endpoints:
+        count = len(record["points"])
+        protected_indices.update(range(count) if record["endpoint"] == "start"
+                                 else range(len(route) - count, len(route)))
+    answer, arcs, index, work = [route[0]], [], 1, 0
+    while index < len(route) - 1:
+        # An arc must have a straight segment on both sides, and >= 4 chords.
+        if index + 4 >= len(route) - 1:
+            answer.extend(route[index:])
+            break
+        a, b, c = route[index:index + 3]
+        u, v = _sub(b, a), _sub(c, a)
+        cross = _cross(u, v)
+        squared = _dot(cross, cross)
+        if squared <= _dot(u, u) * _dot(v, v) * 1e-12:
+            answer.append(route[index]); index += 1
+            continue
+        center = _add(a, _mul(_add(_mul(_cross(v, cross), _dot(u, u)),
+                                  _mul(_cross(cross, u), _dot(v, v))), 1 / (2 * squared)))
+        radius, normal = math.dist(a, center), _unit(cross)
+        # A radius-dependent allowance only covers floating-point roundoff.
+        tolerance = max(SAMPLED_ARC_FIT_TOLERANCE_MM, radius * 1e-9)
+        end, angle, residual = index, 0.0, 0.0
+        previous = _unit(_sub(a, center))
+        for next_index in range(index + 1, len(route)):
+            work += 1
+            if work > MAX_SAMPLED_ARC_WORK:
+                return {"points": None, "arcs": arcs, "limit_reached": True,
+                        "fit_tolerance_mm": SAMPLED_ARC_FIT_TOLERANCE_MM,
+                        "reason": "Sampled-arc recognition exceeded its bounded work limit; no reconstructed seed was used."}
+            radial = _sub(route[next_index], center)
+            error = max(abs(math.sqrt(_dot(radial, radial)) - radius), abs(_dot(radial, normal)))
+            if error > tolerance:
+                break
+            current = _unit(radial)
+            step = math.atan2(_dot(normal, _cross(previous, current)), _dot(previous, current))
+            if step <= 1e-6 or step > math.radians(30) + 1e-8 or angle + step >= math.radians(175):
+                break
+            angle += step
+            end, previous = next_index, current
+            residual = max(residual, error)
+        if end - index < 4 or end >= len(route) - 1:
+            answer.append(route[index]); index += 1
+            continue
+        incoming = _unit(_sub(a, route[index - 1]))
+        outgoing = _unit(_sub(route[end + 1], route[end]))
+        tangent_start = _unit(_cross(normal, _sub(a, center)))
+        tangent_end = _unit(_cross(normal, _sub(route[end], center)))
+        trim = radius * math.tan(angle / 2)
+        vertex = _add(a, _mul(incoming, trim))
+        other_vertex = _sub(route[end], _mul(outgoing, trim))
+        # Tight directional agreement prevents a near-circle with a kink from
+        # silently becoming a tangent elbow. Uncertain curves stay untouched.
+        if (math.dist(incoming, tangent_start) > 1e-8 or math.dist(outgoing, tangent_end) > 1e-8
+                or math.dist(vertex, other_vertex) > tolerance):
+            answer.append(route[index]); index += 1
+            continue
+        inside_protected = any(i in protected_indices for i in range(index + 1, end))
+        arcs.append({"source_start_point_index": index, "source_end_point_index": end,
+                     "sample_count": end - index + 1, "observed_radius_mm": radius,
+                     "observed_angle_deg": math.degrees(angle), "maximum_fit_error_mm": residual,
+                     "construction_vertex": list(vertex), "protected_samples": inside_protected,
+                     "identity_verified": False})
+        if inside_protected:
+            answer.extend(route[index:end + 1])
+        else:
+            # Exact protected boundary points must survive even when they are
+            # collinear with the construction vertex. The assembly planner
+            # separately refuses a larger bend that would consume that stub.
+            if index in protected_indices:
+                answer.append(route[index])
+            answer.append(vertex)
+            if end in protected_indices:
+                answer.append(route[end])
+        index = end + 1
+    if index == len(route) - 1:
+        answer.append(route[-1])
+    usable = bool(arcs) and not any(arc["protected_samples"] for arc in arcs)
+    return {"points": [list(point) for point in answer] if usable else None,
+            "arcs": arcs, "limit_reached": False,
+            "fit_tolerance_mm": SAMPLED_ARC_FIT_TOLERANCE_MM,
+            "reason": ("Recognized circular samples provide construction vertices only; proposed radius and all physical checks remain independent."
+                       if usable else "No fully movable, tangent circular-sample reconstruction was established.")}
+
+
 def _on_segment(point, start, end):
     vector = _sub(end, start)
     squared = _dot(vector, vector)

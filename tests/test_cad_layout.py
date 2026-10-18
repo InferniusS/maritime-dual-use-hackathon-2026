@@ -95,6 +95,20 @@ def test_neighboring_endpoint_connector_remains_a_contact(cad):
     assert any('fixed endpoints' in warning for warning in result['cad_context']['warnings'])
 
 
+def test_contact_preparation_explains_clearance_only_without_selecting_it(cad):
+    cad['objects'] = [cad['objects'][0], solid('NEAR-END', [120,-5,-5], [125,5,5])]
+    result = prepare_cad_layout(cad, 'A:candidate-run', clearance=20, padding=50)
+    contact = result['cad_context']['endpoint_contacts'][0]
+    assert contact['endpoint'] == 'end'
+    assert contact['source_handle'] == 'NEAR-END'
+    assert contact['contact_kind'] == 'clearance_only'
+    assert contact['remaining_pipe_clearance_mm'] == pytest.approx(15)
+    assert contact['stub_preview']['required_length_mm'] == pytest.approx(5.001, abs=1e-5)
+    assert not contact['connection_verified']
+    assert not result.get('protected_endpoints')
+    assert len(result['obstacles']) == 1
+
+
 def test_thin_geometry_gets_a_nonempty_box(cad):
     cad['objects'] = [cad['objects'][0], solid('PLANE', [20,0,0], [20,10,0])]
     result = prepare_cad_layout(cad, 'A:candidate-run', padding=50)

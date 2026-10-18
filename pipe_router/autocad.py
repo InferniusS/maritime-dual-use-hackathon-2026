@@ -16,6 +16,7 @@ from .cad_import import inspect_cad
 from .cad_network import inspect_network
 
 API_VERSION = 1
+RELEASE_ID = "repair-batch-20261018"
 MAX_CAD_BYTES = 48 * 1024 * 1024
 MAX_MATCHED_CANDIDATES = 50
 MAX_SELECTED_HANDLES = 256
@@ -25,7 +26,8 @@ def service_health():
     return {
         "service": "maritime-pipe-router",
         "api_version": API_VERSION,
-        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel", "rounded_pipe_proposal", "drawing_review", "coordinated_sections", "drawing_scan"],
+        "release": RELEASE_ID,
+        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel", "rounded_pipe_proposal", "drawing_review", "coordinated_sections", "drawing_scan", "endpoint_contact_evidence", "sampled_curve_seeds"],
         "units": "mm",
     }
 
@@ -143,6 +145,7 @@ def inspect_snapshot(source, *, source_units, selected_handles, document):
         )
     context = {
         "api_version": API_VERSION,
+        "release": RELEASE_ID,
         "document": deepcopy(document),
         "selected_handles": list(selected_handles),
         "source_snapshot_sha256": cad["source_sha256"],
@@ -156,6 +159,7 @@ def inspect_snapshot(source, *, source_units, selected_handles, document):
     ]))
     summary = {
         "api_version": API_VERSION,
+        "release": RELEASE_ID,
         "source_sha256": cad["source_sha256"],
         "source_units": source_units,
         "units": "mm",

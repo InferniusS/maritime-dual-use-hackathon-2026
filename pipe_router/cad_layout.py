@@ -134,7 +134,7 @@ def _overlaps(box, bounds):
                and box["max"][axis] >= bounds["min"][axis] for axis in range(3))
 
 
-def _endpoint_contacts(points, boxes, envelope):
+def _endpoint_contacts(points, boxes, envelope, pipe_radius=None, maximum_stub=250.0):
     contacts = []
     for label, point in (("start", points[0]), ("end", points[-1])):
         for box in boxes:
@@ -146,6 +146,10 @@ def _endpoint_contacts(points, boxes, envelope):
                     "scope": "Inside the component envelope expanded by pipe radius and clearance",
                     "obstacle_method": box["obstacle_method"],
                 })
+                if pipe_radius is not None:
+                    from .endpoint_contacts import contact_evidence
+                    contacts[-1].update(contact_evidence(points, label, box, pipe_radius,
+                                                        envelope - pipe_radius, maximum_stub))
     return contacts
 
 
@@ -246,7 +250,7 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         )
     obstacles = [{"id": box["id"], "min": list(box["min"]), "max": list(box["max"]),
                   **({"capsules": deepcopy(box["capsules"])} if "capsules" in box else {})} for box in nearby]
-    contacts = _endpoint_contacts(points, nearby, envelope)
+    contacts = _endpoint_contacts(points, nearby, envelope, diameter / 2, max_stub_length)
     declared_solids = cad.get("counts", {}).get("solid_instances")
     missing = max(0, declared_solids - len(all_boxes)) if isinstance(declared_solids, int) else None
     warnings = [
@@ -335,13 +339,17 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         # Context geometry participates in contact discovery before connector
         # exemptions are offered. All other obstacles remain active.
         contacts = []
+        from .endpoint_contacts import contact_evidence
         for endpoint, point in (("start", points[0]), ("end", points[-1])):
             for obstacle in result["obstacles"]:
                 shape = core._prepare_obstacle(obstacle, "context contact", envelope)
                 if core._segment_intersects_box(tuple(point), tuple(point), shape):
                     source = next((r for r in result["cad_context"]["obstacle_sources"] if r["id"] == obstacle["id"]), {})
                     contacts.append({"endpoint": endpoint, "obstacle_id": obstacle["id"],
-                                     "source_handle": source.get("source_handle", obstacle["id"])})
+                                     "source_handle": source.get("source_handle", obstacle["id"]),
+                                     "instance_path": deepcopy(source.get("instance_path", [])),
+                                     "obstacle_method": source.get("obstacle_method", "supported_surface_capsules" if "capsules" in obstacle else "sample_box"),
+                                     **contact_evidence(points, endpoint, obstacle, diameter / 2, clearance, max_stub_length)})
         result["cad_context"]["endpoint_contacts"] = contacts
         result["cad_context"]["counts"].update({"checked_obstacles": len(result["obstacles"]),
             "pipe_shaped_obstacles": sum("capsules" in o for o in result["obstacles"]),

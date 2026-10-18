@@ -6,26 +6,29 @@
   "sdk_version": "10.0.402",
   "autodesk_reference_package": "AutoCAD.NET 26.0.0",
   "command": "dotnet build autocad-plugin/Maritime.AutoCAD.csproj -c Release -p:DebugType=None",
-  "dll_sha256": "b7f0bb1c135f82533f5dc9751bd0d7a7622fcb2622719dec43f3ba884d27d01f",
+  "dll_sha256": "0052aa111622e0ec6d7893c648ddc4250fe79920e7918032f74af5427f280fe5",
   "source_sha256": {
     "autocad-plugin/AssemblyPreview.cs": "bcaf168222707d0f41c7f28749f2b004cf3f703f705974e470a1df391b6b7a0a",
     "autocad-plugin/CadCommand.cs": "fea8c12454a969f921908be4ded2132944fdeaf9ddace9e625b723d28aa1b806",
     "autocad-plugin/DrawingScan.cs": "17b76e1cae24c667a1964f94a28af87041954dc0e6d363aafa61260d0ffe48f1",
     "autocad-plugin/PreviewCommand.cs": "dff20992ce696633efccd061a3eb5309d78e535c1d04f2755c2e7869c9afa522",
     "autocad-plugin/ReviewDimensions.cs": "a65d545fbe3f2f7ff116720b080da5533a03319bbb808f4bfed1b7e2472b4bf1",
-    "autocad-plugin/SystemReview.cs": "09f65d843b115c042dc1ab08d720dd1592f0dd73b6022475e17ac5d839c76567",
+    "autocad-plugin/SystemReview.cs": "7178219326da814c4d259f3920b3a8e6305c923855c3fd611f38035162881c3e",
     "autocad-plugin/Maritime.AutoCAD.csproj": "25934cc9a6fa53a3decbd00759bccd3ececf07e99a18123fb8c336c2351ed6b1"
   },
   "build_warnings": 0,
   "build_errors": 0,
   "autocad_runtime_verified": false,
-  "runtime_check_needed": "On Snapdragon: INSPECT each contact, confirm correct source/block and endpoint, verify Enter returns without accepting it and Esc cleans up markers/highlights. Verify source unchanged, correct units and new scan; then review intended connections, run and save accepted output. No successful real-model repair is established by this build alone.",
+  "runtime_check_needed": "Run MARITIMEVERSION to confirm plugin/service match; test magenta contact path, evidence and Next/Previous/Return cleanup. New native SCRIPT acceptance fixtures are invented tests. Verify normal scan repair/unchanged/blocked, dimensions, Excel, Undo and reopen on Snapdragon. Real cooling section17 remains unresolved; no current-release accepted organizer-model repair is established.",
   "bundled_autodesk_runtime_assemblies": false,
-  "build_feature": "Contact inspection with source highlighting, component bounds and fixed endpoint markers; corrected routing failure diagnostics",
+  "build_feature": "Endpoint geometry evidence, sampled circular bend proposal seeds, pressure straight orientation guard, traceable contact exports and native release check",
   "previous_venue_evidence": [
     "Rounded synthetic demo displayed",
     "3D comparison saved and MARITIMEVIEW toggles displayed",
-    "MARITIMEREVIEW saved three green review meshes in supplied cooling drawing"
+    "MARITIMEREVIEW saved three green review meshes in supplied cooling drawing",
+    "Four contact inspector views displayed in AutoCAD on Snapdragon",
+    "Updated native report correctly identified four blocked endpoint contacts; no proposal saved"
   ],
-  "automated_tests_passed": 794
+  "automated_tests_passed": 842,
+  "release": "repair-batch-20261018"
 }

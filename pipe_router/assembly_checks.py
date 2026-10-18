@@ -11,7 +11,7 @@ import math
 
 from . import core
 from .challenge_rules import (
-    ANGLE_TOLERANCE_DEG, DOCUMENT, LENGTH_TOLERANCE_MM, bend_requirements,
+    ANGLE_TOLERANCE_DEG, DOCUMENT, LENGTH_TOLERANCE_MM, _axes, bend_requirements,
 )
 
 MAX_PIECE_LENGTH_MM = 6096.0
@@ -132,6 +132,81 @@ def _nominal_basis(layout):
             "limits": limits, "message": reason}
 
 
+def _pressure_orientation_finding(layout, components):
+    """Screen generated free straights, without interpreting bend chords as runs.
+
+    A horizontal run may have any in-plane direction. An explicitly protected
+    source stub remains fixed; its oblique orientation is disclosed, not approved.
+    Missing ship orientation uses a clearly provisional +Z screen, never an
+    inferred or confirmed ship frame.
+    """
+    if layout.get("rule_profile") != "fmg-v3" or layout.get("system_type") != "pressurized":
+        return None
+    axes = layout.get("engineering", {}).get("ship_axes")
+    origin = "engineering.ship_axes"
+    if axes is None:
+        axes = layout.get("model_context", {}).get("ship_axes")
+        origin = "model_context.ship_axes"
+    if axes is not None:
+        axes = _axes(axes, origin)
+    up = axes.get("up") if axes else None
+    confirmed = bool(up and axes.get("confirmed") is True)
+    if up is None:
+        up, origin = "+Z", "provisional +Z assumption; no up direction supplied"
+    axis = "XYZ".index(up[-1])
+    other = [i for i in range(3) if i != axis]
+
+    original = [core._point(point, "original route") for point in layout["pipe"]["original_route"]]
+    fixed = []
+    for record in layout.get("protected_endpoints", []):
+        points = [core._point(point, "protected point") for point in record.get("points", [])]
+        if len(points) < 2 or record.get("endpoint") not in ("start", "end"):
+            continue
+        expected = original[:len(points)] if record["endpoint"] == "start" else original[-len(points):]
+        if points == expected:
+            fixed.extend(zip(points, points[1:]))
+
+    def contained(start, end, a, b):
+        direction = _sub(b, a)
+        squared = _dot(direction, direction)
+        if squared == 0 or _dot(_sub(end, start), direction) < 0:
+            return False
+        for point in (start, end):
+            offset = _sub(point, a)
+            t = _dot(offset, direction) / squared
+            projection = tuple(a[i] + t * direction[i] for i in range(3))
+            if t < 0 or t > 1 or math.dist(point, projection) > LENGTH_TOLERANCE_MM:
+                return False
+        return True
+
+    bad, fixed_oblique, measured = [], [], []
+    for component in components:
+        if component["kind"] != "straight":
+            continue
+        points = component["centerline_points"]
+        for start, end in zip(points, points[1:]):
+            delta = _sub(end, start)
+            rise, run = abs(delta[axis]), math.hypot(*(delta[i] for i in other))
+            if rise <= LENGTH_TOLERANCE_MM or run <= LENGTH_TOLERANCE_MM:
+                continue
+            protected = any(contained(start, end, a, b) for a, b in fixed)
+            (fixed_oblique if protected else bad).append(component["id"])
+            measured.append({"component_id": component["id"], "start_mm": list(start), "end_mm": list(end),
+                             "rise_mm": rise, "horizontal_run_mm": run, "unchanged_protected_stub": protected})
+    status = "fail" if bad else "needs_review" if fixed_oblique or not confirmed else "pass"
+    message = ("A generated free pressure straight rises obliquely; free straights must be horizontal or vertical in the stated up frame."
+               if bad else "Generated free pressure straights are horizontal or vertical in the stated up frame.")
+    if fixed_oblique:
+        message += " Oblique portions of exact original protected stubs remain unchanged and need designer review; they are not approved exceptions to the brief."
+    if not confirmed:
+        message += f" The {up} up direction is provisional or unconfirmed; confirm the ship orientation before claiming this requirement passes."
+    return _finding("pressure_straight_orientation", status, message,
+                    measured={"up_axis": up, "axis_source": origin, "axis_confirmed": confirmed,
+                              "oblique_segments": measured, "fixed_oblique_component_ids": sorted(set(fixed_oblique))},
+                    required={"free_straights": "horizontal or vertical", "numeric_tolerance_mm": LENGTH_TOLERANCE_MM,
+                              "confirmed_ship_orientation": True}, component_ids=sorted(set(bad)))
+
+
 def assess_generated_components(layout, components):
     """Return a JSON-safe assessment of the actual proposed pieces.
 
@@ -226,6 +301,10 @@ def assess_generated_components(layout, components):
                 measured=records, required={"nominal_diameter_mm": basis["nominal_diameter_mm"], "minimum_mm": basis["limits"][minimum_key]},
                 component_ids=[record.get("component_id", record.get("to_bend")) for record in bad], source_refs=basis["source_refs"]))
 
+    orientation = _pressure_orientation_finding(layout, components)
+    if orientation is not None:
+        findings.append(orientation)
+    geometric = list(findings)
     for rule, message in (
         ("joint_design", "Proposed interfaces are not approved welds or shop spool boundaries. Joint type, mating, weld spacing convention and assembly sequence need designer review."),
         ("fitting_catalog", "Generated bend shapes have no verified manufacturer or part number; availability of a matching commercial fitting is unverified."),
@@ -239,7 +318,6 @@ def assess_generated_components(layout, components):
         findings.append(finding)
     counts = {status: sum(f["status"] == status for f in findings) for status in ("pass", "fail", "needs_review", "not_applicable")}
     blocking = sum(f["status"] == "fail" and f["severity"] == "error" for f in findings)
-    geometric = findings[:7]
     return {"status": "blocked" if blocking else "needs_review", "counts": counts,
             "blocking_failure_count": blocking,
             "mandatory_geometry_passed": all(f["status"] in ("pass", "not_applicable") for f in geometric if f["severity"] == "error"),

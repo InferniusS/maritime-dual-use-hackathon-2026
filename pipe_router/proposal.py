@@ -129,7 +129,7 @@ def _score(assembly):
 
 def add_pipe_proposal(result):
     """Replace a centerline-only result with a checked rounded proposal opt-in."""
-    from .assembly import plan_assembly, render_reference
+    from .assembly import plan_assembly, render_reference, reconstruct_sampled_arcs
     from .workflow import _validate_normalized
     layout = result['normalized_layout']
     options = layout.get('proposal', {})
@@ -142,10 +142,30 @@ def add_pipe_proposal(result):
     started = time.monotonic()
     original = result['original']
     result['centerline_search'] = deepcopy(result.get('search', {}))
+    recognition_warning = None
     try:
-        baseline = plan_assembly(layout,original['points'],bend_radius_mm=radius)
+        sampled = reconstruct_sampled_arcs(original['points'], layout.get('protected_endpoints', []))
     except ValueError as error:
-        baseline = {'status':'blocked','findings':[{'code':'baseline_assembly_unavailable','status':'needs_review','message':str(error)}]}
+        # The original reference may be malformed even when the separately
+        # searched replacement is usable. Do not clean protected source points
+        # or turn optional recognition into a fatal workflow failure.
+        recognition_warning = str(error)
+        sampled = {'points':None, 'arcs':[], 'limit_reached':False,
+                   'status':'needs_review', 'reason':recognition_warning}
+    if sampled['arcs']:
+        # Source samples describe an existing curved centerline, not many tiny
+        # fabricated straights. Refilleting each sample would invent a source
+        # defect; replacing its observed radius would invent a baseline.
+        baseline = {'status':'needs_review', 'findings':[{
+            'code':'baseline_sampled_arcs', 'status':'needs_review',
+            'message':'Circular samples were recognized in the original reference. Their observed radii are not a verified fitting inventory; the original is not re-filleted at every sample or assigned fabricated-piece savings.',
+            'recognized_arc_count':len(sampled['arcs']),
+            'observed_radii_mm':[arc['observed_radius_mm'] for arc in sampled['arcs']]}]}
+    else:
+        try:
+            baseline = plan_assembly(layout,original['points'],bend_radius_mm=radius)
+        except ValueError as error:
+            baseline = {'status':'blocked','findings':[{'code':'baseline_assembly_unavailable','status':'needs_review','message':str(error)}]}
     best = None
     diagnostics = []
     seen = set()
@@ -153,7 +173,9 @@ def add_pipe_proposal(result):
     limited = False
     if baseline['status']=='ready' and original['valid']:
         best = (_score(baseline), original['points'], baseline, True)
-    initial = [result['candidate']['points']] if result.get('candidate') else []
+    initial = ([sampled['points']] if sampled['points'] else [])
+    if result.get('candidate'):
+        initial.append(result['candidate']['points'])
     routes = itertools.chain(initial, _alternatives(layout,radius)) if layout['system_type']=='pressurized' else initial
     for points in routes:
         if evaluated >= MAX_ALTERNATIVES or time.monotonic()-started >= MAX_SEARCH_SECONDS:
@@ -224,7 +246,9 @@ def add_pipe_proposal(result):
         blocked = result['centerline_search'].get('blocked_endpoints', [])
         if blocked:
             contacts = ', '.join(dict.fromkeys(
-                str(item['endpoint']) + ': ' + str(item['obstacle']) for item in blocked))
+                str(item['endpoint']) + ': ' + (str(item['source_handle']) + ' (' + str(item['obstacle']) + ')'
+                                               if item.get('source_handle') else str(item['obstacle']))
+                for item in blocked))
             reason = ('The centerline search could not start because fixed endpoints touch obstacle envelopes '
                       '(' + contacts + '). Verify intended connections and clearance. ' + reason)
         result['search']['reason'] = reason
@@ -233,6 +257,11 @@ def add_pipe_proposal(result):
     if reference_warning:
         assembly['findings'].append({'code':'reference_unavailable','status':'needs_review','message':reference_warning})
     assembly['baseline_status']=baseline['status']
+    assembly['sampled_curve_review'] = sampled
+    if recognition_warning:
+        assembly['findings'].append({'code':'sampled_curve_recognition_unavailable',
+            'status':'needs_review', 'scope':'baseline_reconstruction',
+            'message':'The original reference could not be recognized as circular samples: ' + recognition_warning})
     # Reconstruction failures describe our interpretation of the reference, not
     # a verified defect in the source CAD or the cause of candidate rejection.
     assembly['baseline_findings'] = [

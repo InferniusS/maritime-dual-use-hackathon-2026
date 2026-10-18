@@ -186,25 +186,14 @@ def _route_at_distance(points, distance):
 
 
 def _connection_exit_distance(points, boxes, maximum):
-    intervals, travelled = [], 0.0
-    for start, end in zip(points, points[1:]):
-        length = math.dist(start, end)
-        for box in boxes:
-            for interval in core._segment_obstacle_intervals(start, end, box):
-                intervals.append((travelled + interval[0] * length, travelled + interval[1] * length))
-        travelled += length
-    end_of_contact = 0.0
-    next_contact = travelled
-    for low, high in sorted(intervals):
-        if low > end_of_contact + core.EPSILON:
-            next_contact = low
-            break
-        end_of_contact = max(end_of_contact, high)
-    if end_of_contact >= travelled - core.EPSILON:
+    from .endpoint_contacts import endpoint_stub_extent
+    extent = endpoint_stub_extent(points, boxes)
+    if extent["covers_route"]:
         raise ValueError("The selected connector covers the whole original route. No free connection stub endpoint exists")
-    exit_distance = end_of_contact + min(0.001, (next_contact - end_of_contact) / 2)
+    exit_distance = extent["required_length_mm"]
     if exit_distance > maximum:
-        raise ValueError(f"The original path does not exit the selected connector within the {maximum:g} mm connection stub limit")
+        raise ValueError(f"The original path does not exit the selected connector within the {maximum:g} mm connection stub limit "
+                         f"(requires {exit_distance:.3f} mm along the original route). Review the selected contact and section endpoints")
     return exit_distance
 
 
@@ -261,7 +250,12 @@ def with_endpoint_connections(layout: dict, endpoint_connections: dict | None, m
     records = []
     for endpoint, request in requests.items():
         points = expanded[:start_index + 1] if endpoint == "start" else expanded[end_index:]
-        records.append({"endpoint": endpoint, "points": deepcopy(points), "obstacle_ids": request["obstacle_ids"], "max_distance": maximum})
+        contacts = result.get("cad_context", {}).get("endpoint_contacts", [])
+        records.append({"endpoint": endpoint, "points": deepcopy(points), "obstacle_ids": request["obstacle_ids"], "max_distance": maximum,
+                        "original_stub_length_mm": request["distance"],
+                        "approval_basis": "Explicit user selection; connection identity remains unverified",
+                        "contact_evidence": [deepcopy(contact) for contact in contacts if contact.get("endpoint") == endpoint
+                                             and contact.get("obstacle_id") in request["obstacle_ids"]]})
     result["pipe"]["original_route"] = expanded
     result["protected_endpoints"] = records
     result["assumptions"].append("Explicit endpoint connector contacts are accepted only on bounded unchanged original connection stubs. Equipment ports and connection identities remain unverified.")

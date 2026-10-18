@@ -1,5 +1,8 @@
 # Maritime Dual Use Hackathon 2026
 
+
+**Latest test build:** `repair-batch-20261018`. Start with the [repair-batch Snapdragon guide](docs/repair-batch-snapdragon.md) and run `MARITIMEVERSION` after loading the DLL. This build adds endpoint contact evidence, sampled-curve proposal seeds and pressure straight-orientation checks. It does not establish a completed real-model repair or full specification compliance.
+
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
 **Current status:** the team has displayed and saved a rounded proposal in the supplied cooling drawing on the Snapdragon. The newest build adds `MARITIMESCAN` to screen the full inferred drawing inventory and `MARITIMEFIND` to locate its findings. The supplied cooling file has 1,416 inferred sections; all were geometrically screened on the Mac with none omitted. Follow the [whole-drawing Snapdragon guide](docs/whole-drawing-snapdragon-test.md). The new commands need a Windows rehearsal. Complete engineering and fabrication requirements remain tracked in the [acceptance matrix](docs/requirement-acceptance-matrix.md).

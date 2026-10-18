@@ -17,6 +17,29 @@ namespace Maritime.AutoCAD;
 
 public sealed partial class PreviewCommand
 {
+    private const string RepairRelease = "repair-batch-20261018";
+
+    [CommandMethod("MARITIMEVERSION", CommandFlags.Modal)]
+    public static void ShowRepairVersion()
+    {
+        var editor = AcApplication.DocumentManager.MdiActiveDocument?.Editor;
+        if (editor is null) return;
+        editor.WriteMessage($"\nMaritime plugin: {RepairRelease}");
+        try
+        {
+            using var client = CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+            var health = SendServiceJson(client, HttpMethod.Get, "/api/health");
+            CheckService(client, "endpoint_contact_evidence");
+            var release = health["release"]?.GetValue<string>() ?? "older release";
+            editor.WriteMessage($"\nLocal service: {release}");
+            editor.WriteMessage(release == RepairRelease
+                ? "\nPlugin and service release match. Ready for the repair-batch tests."
+                : "\nRelease mismatch. Update both pipe_router and autocad-plugin, restart Python and AutoCAD, then reload the DLL.");
+        }
+        catch (System.Exception error) { editor.WriteMessage($"\nService check failed: {error.Message}\nStart the updated local Python service and retry MARITIMEVERSION."); }
+    }
+
     private const int MaximumCoordinatedSections = 12;
     private static readonly Dictionary<Database, string> LatestReports = new();
     private static readonly Dictionary<Database, (string Url, string CadId, string Hash)> PendingReports = new();
@@ -101,6 +124,7 @@ public sealed partial class PreviewCommand
     {
         var editor = document.Editor;
         RequireCurrentScanSnapshot(document, cadId, snapshotHash);
+        CheckService(client, "endpoint_contact_evidence");
         List<int> selected;
         while (true)
         {
@@ -209,6 +233,7 @@ public sealed partial class PreviewCommand
         {
             var contact = contacts[index] ?? throw new InvalidOperationException("An empty contact was returned.");
             editor.WriteMessage($"\nContact {index + 1}: {Text(contact, "endpoint")}, source {Text(contact, "source_handle")} ({Text(contact, "obstacle_id")})");
+            if (contact["contact_summary"] is JsonValue summary) editor.WriteMessage($"\n  {summary.GetValue<string>()}");
         }
         List<int> accepted;
         while (true)
@@ -221,7 +246,16 @@ public sealed partial class PreviewCommand
             {
                 if (!int.TryParse(inspect.Groups[1].Value, out var contactNumber) || contactNumber < 1 || contactNumber > contacts.Count)
                     editor.WriteMessage($"\nChoose a contact number from 1 to {contacts.Count}.");
-                else if (!InspectSectionContact(document, layout, contacts[contactNumber - 1]!, contactNumber, drawingScale)) return false;
+                else
+                {
+                    while (true)
+                    {
+                        var navigation = InspectSectionContact(document, layout, contacts[contactNumber - 1]!, contactNumber, contacts.Count, drawingScale);
+                        if (navigation is null) return false;
+                        if (navigation == "Return") break;
+                        contactNumber = navigation == "Next" ? Math.Min(contacts.Count, contactNumber + 1) : Math.Max(1, contactNumber - 1);
+                    }
+                }
                 continue;
             }
             if (answer.StringResult.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase))
@@ -252,7 +286,7 @@ public sealed partial class PreviewCommand
         return true;
     }
 
-    private static bool InspectSectionContact(Document document, JsonObject layout, JsonNode contact, int number, double scale)
+    private static string? InspectSectionContact(Document document, JsonObject layout, JsonNode contact, int number, int total, double scale)
     {
         var editor = document.Editor;
         var obstacle = (layout["obstacles"] as JsonArray)?.FirstOrDefault(item => item?["id"]?.GetValue<string>() == Text(contact, "obstacle_id"));
@@ -291,13 +325,31 @@ public sealed partial class PreviewCommand
             var size = Math.Max(25, Number(layout["pipe"]!, "diameter")) / scale;
             foreach (var axis in new[] { Vector3d.XAxis, Vector3d.YAxis, Vector3d.ZAxis })
                 AddLine(endpoint - axis * size, endpoint + axis * size, 1);
-            FrameMeshReview(document, corners.Concat(new[] { endpoint }).ToArray());
+            // Distinguish the selected path from cyan source wireframe. Clip the
+            // overlay to this contact region without altering source entities.
+            var original = ReadPoints(layout["pipe"]?["original_route"], "selected section").Select(point => Scale(point, scale)).ToList();
+            if (Text(contact, "endpoint") == "end") original.Reverse();
+            var reach = Math.Max(minimum.DistanceTo(maximum) * 1.5, size * 5);
+            var remaining = reach;
+            var focus = corners.Concat(new[] { endpoint }).ToList();
+            for (var i = 1; i < original.Count && remaining > 0; i++)
+            {
+                var a = original[i - 1]; var b = original[i];
+                var distance = a.DistanceTo(b);
+                if (distance <= 1e-9) continue;
+                var finish = distance <= remaining ? b : a + (b - a) * (remaining / distance);
+                AddLine(a, finish, 6); focus.Add(finish); remaining -= distance;
+            }
+            FrameMeshReview(document, focus);
             editor.Regen();
             editor.WriteMessage($"\nContact {number}: {Text(contact, "endpoint")}, source {Text(contact, "source_handle")}. Yellow box locates the component bounds; red cross marks the route endpoint. This is NOT a proposal or proof of a connection.\nEnvelope method: {contact["obstacle_method"]}. Contact can include clearance, not only physical overlap.");
             if (nested) editor.WriteMessage("\nThe owning block is highlighted; the yellow box locates the particular nested component.");
             if (highlighted.IsNull) editor.WriteMessage("\nSource highlighting unavailable. Only recorded bounds are shown; do not infer a verified connection from this box.");
-            var answer = editor.GetString(new PromptStringOptions("\nInspect the component. Press Enter to return to contact selection (nothing is accepted automatically): "));
-            return answer.Status is PromptStatus.OK or PromptStatus.None;
+            editor.WriteMessage("\nMAGENTA = selected pipe path near this endpoint. Yellow = contacted component bounds. Red = fixed endpoint. Source geometry is unchanged.");
+            if (contact["contact_summary"] is JsonValue summary) editor.WriteMessage($"\nContact evidence: {summary.GetValue<string>()}");
+            if (contact["stub_preview"] is JsonObject stub)
+                editor.WriteMessage($"\nFixed-path preview: {stub["status"]}; required length {stub["required_length_mm"]} mm; current limit {stub["limit_mm"]} mm. This does not approve the contact.");
+            return AskKeyword(editor, $"Inspect contact {number}/{total}; Enter returns without approving", ["Next", "Previous", "Return"], "Return");
         }
         finally
         {
@@ -314,7 +366,7 @@ public sealed partial class PreviewCommand
         }
         void AddLine(Point3d start, Point3d end, short color)
         {
-            var line = new Line(start, end) { ColorIndex = color };
+            var line = new Line(start, end) { ColorIndex = color, LineWeight = LineWeight.LineWeight050 };
             if (manager.AddTransient(line, TransientDrawingMode.Main, 128, viewports)) lines.Add(line);
             else line.Dispose();
         }

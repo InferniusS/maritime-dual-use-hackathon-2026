@@ -128,3 +128,31 @@ def test_combined_exports_keep_source_identity_and_only_accepted_proposals(tmp_p
 def test_unknown_job_and_path_traversal_do_not_access_files(autocad_workspace):
     for path in ("/api/system-jobs/../result.json", "/api/system-jobs/" + "a"*32):
         assert request(autocad_workspace, "GET", path)[0] == 404
+
+
+def test_contact_decisions_are_traceable_in_html_and_excel_without_certification(tmp_path):
+    summary = optimize_sections(drawing([[[0, 0, 0], [2000, 0, 0]]]), selections(1))
+    row = summary['routes'][0]
+    row['layout']['cad_context']['endpoint_contacts'] = [
+        {'endpoint': 'start', 'obstacle_id': 'connector', 'source_handle': '<E1>',
+         'instance_path': ['A:1'], 'contact_kind': 'clearance_only',
+         'contact_summary': 'Clearance envelope only; joint identity unknown',
+         'remaining_pipe_clearance_mm': 20.0, 'stub_preview': {'status': 'available', 'required_length_mm': 42}},
+        {'endpoint': 'end', 'obstacle_id': 'connector', 'source_handle': '<E1>',
+         'contact_summary': 'Other end; not approved'},
+    ]
+    row['layout']['protected_endpoints'] = [{'endpoint': 'start', 'obstacle_ids': ['connector']}]
+    before = deepcopy(summary)
+    write_system_review(summary, tmp_path)
+    assert summary == before
+    page = (tmp_path / 'report.html').read_text()
+    assert 'Endpoint contact evidence' in page
+    assert '&lt;E1&gt;' in page and '<E1>' not in page
+    assert 'Reviewer selected; identity not automatically verified' in page
+    assert 'Other end; not approved' in page and 'Not approved' in page
+    with ZipFile(tmp_path / 'route-review.xlsx') as book:
+        assert 'Endpoint contacts' in book.read('xl/workbook.xml').decode()
+        sheets = ''.join(book.read(name).decode() for name in book.namelist() if name.startswith('xl/worksheets/'))
+        assert 'Clearance envelope only; joint identity unknown' in sheets
+        assert 'Remaining pipe clearance mm' in sheets
+        assert 'Connection identity verified' in sheets

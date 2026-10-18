@@ -35,6 +35,9 @@ def write_system_review(summary, folder):
     overview = [["Section", "Source handles", "Outcome", "Reason", "Candidate ID", "OD mm", "Start XYZ mm", "End XYZ mm"]]
     parts = [["Section", "Source handles", "Part", "Geometry", "Length mm", "Radius mm", "Angle deg", "Start XYZ mm", "End XYZ mm", "Part status"]]
     checks = [["Section", "Assessment", "Rule", "Status", "Message", "Measurements"]]
+    contacts_sheet = [["Section", "Contact number", "Endpoint", "Source handle", "Instance path", "Obstacle ID",
+                       "Contact kind", "Evidence", "Remaining pipe clearance mm", "Fixed-path preview",
+                       "Reviewer selected", "Connection identity verified"]]
     coverage = [["Item", "Value"], ["Scope", "Coordinated selected sections; not a complete system redesign"],
                 ["Full system verified", False], ["Source", summary.get("source", {})],
                 ["Coverage", summary.get("coverage", {})], ["Counts", summary.get("counts", {})],
@@ -78,7 +81,10 @@ def write_system_review(summary, folder):
                 parts.append([index, handles, part.get("id", ""), part.get("kind", ""), part.get("length_mm", ""),
                               part.get("radius_mm", ""), part.get("angle_deg", ""), part.get("start", []), part.get("end", []), "geometric review"])
                 midpoint = [(a+b)/2 for a, b in zip(part["start"], part["end"])]
-                space.add_text(f"S{index} {part['id']}: {part.get('length_mm', 0):.1f} mm", dxfattribs={
+                label = f"S{index} {part['id']}: L {part.get('length_mm', 0):.1f} mm; OD {pipe.get('diameter', 0):.1f} mm"
+                if part.get('kind') == 'bend':
+                    label += f"; R {part.get('radius_mm', 0):.1f} mm; {part.get('angle_deg', 0):.1f} deg"
+                space.add_text(label, dxfattribs={
                     "layer": f"SECTION_{index:02d}_PROPOSAL", "insert": midpoint, "height": max(2, pipe.get("diameter", 10)*.2)})
         for name, assessment in [("Original rules", result.get("challenge_review", {}).get("original") or {}),
                                   ("Proposal rules", result.get("challenge_review", {}).get("candidate") or {}),
@@ -116,13 +122,31 @@ def write_system_review(summary, folder):
                 detail = f"<p>Rounded length: {baseline.get('centerline_length_mm', 0):,.1f} → {metrics.get('centerline_length_mm', 0):,.1f} mm. " + f"Bends: {baseline.get('bend_count', 0)} → {metrics.get('bend_count', 0)}.</p>"
             else:
                 detail += "<p>Comparable rounded original unavailable: no physical length saving is claimed.</p>"
+        contacts = layout.get("cad_context", {}).get("endpoint_contacts", [])
+        declared = layout.get("protected_endpoints", [])
+        contact_rows = []
+        for contact_number, contact in enumerate(contacts, 1):
+            selected = any(stub.get("endpoint") == contact.get("endpoint") and
+                           contact.get("obstacle_id") in stub.get("obstacle_ids", []) for stub in declared)
+            evidence = contact.get("contact_summary", contact.get("scope", "No geometric classification available"))
+            status = "Reviewer selected; identity not automatically verified" if selected else "Not approved"
+            contacts_sheet.append([index, contact_number, contact.get("endpoint", ""), contact.get("source_handle", ""),
+                contact.get("instance_path", []), contact.get("obstacle_id", ""), contact.get("contact_kind", "unclassified"),
+                evidence, contact.get("remaining_pipe_clearance_mm", ""), contact.get("stub_preview", {}), selected, False])
+            contact_rows.append("<tr>" + "".join("<td>" + escape(value) + "</td>" for value in
+                (contact_number, contact.get("endpoint", ""), contact.get("source_handle", ""), evidence, status)) + "</tr>")
+        if contact_rows:
+            detail += ("<h3>Endpoint contact evidence</h3><p>Clearance-only contact does not prove a physical joint. "
+                       "Box and capsule approximations do not establish component identity. Selecting a contact is a reviewer declaration.</p>"
+                       "<div class='table-scroll'><table><thead><tr><th>Contact</th><th>End</th><th>Source</th><th>Evidence</th><th>Decision</th></tr></thead><tbody>" +
+                       "".join(contact_rows) + "</tbody></table></div>")
         cards.append(f"<article><h2>Section {index} · {escape(row['status'].replace('_', ' '))}</h2><p><strong>Source: {escape(handles)}</strong></p>"
                      f"<p>{escape(row.get('label', row['candidate_id']))}</p><p>{escape(row.get('message', ''))}</p>{detail}</article>")
     figure.update_layout(template="plotly_dark", paper_bgcolor="#101e2d", margin=dict(l=0,r=0,t=20,b=0),
                          scene=dict(aspectmode="data", xaxis_title="X (mm)", yaxis_title="Y (mm)", zaxis_title="Z (mm)"), height=650)
     chart = figure.to_html(full_html=False, include_plotlyjs=True, div_id="system-review")
     coverage.extend(["Limitation", text] for text in summary.get("limitations", []))
-    write_workbook([("Overview", overview), ("Geometric pieces", parts), ("Rule findings", checks), ("Coverage", coverage)], folder / "route-review.xlsx")
+    write_workbook([("Overview", overview), ("Geometric pieces", parts), ("Rule findings", checks), ("Endpoint contacts", contacts_sheet), ("Coverage", coverage)], folder / "route-review.xlsx")
     space.add_text("COORDINATED SECTION REVIEW. Units mm. Source CAD unchanged. Not a complete system or fabricated pipe model.", dxfattribs={"height": 20})
     drawing.saveas(folder / "route-centerlines.dxf")
     counts = " · ".join(f"{value} {key.replace('_', ' ')}" for key, value in summary.get("counts", {}).items())
@@ -130,7 +154,7 @@ def write_system_review(summary, folder):
     coverage_text = (f"{covered.get('requested_sections', 0)} sections selected; {covered.get('processed_sections', 0)} processed; "
                      f"{covered.get('accepted_sections', 0)} accepted under the implemented checks. The full drawing is not verified.")
     page = f'''<!doctype html><html><head><meta charset="utf-8"><title>Coordinated section review</title>
-<style>body{{margin:0;background:#101e2d;color:#edf4ff;font:17px system-ui}}main{{max-width:1150px;margin:auto;padding:32px}}h1{{font-size:36px}}article{{background:#1b3044;padding:20px;margin:18px 0;border-radius:12px;break-inside:avoid}}a{{color:#79e4f2}}p,li{{line-height:1.5}}.badge{{font-weight:bold;color:#79e4f2}}@media print{{body{{background:white;color:black}}main{{padding:0}}article{{background:white;border:1px solid #777}}#system-review{{display:none}}}}</style></head>
+<style>body{{margin:0;background:#101e2d;color:#edf4ff;font:17px system-ui}}main{{max-width:1150px;margin:auto;padding:32px}}h1{{font-size:36px}}article{{background:#1b3044;padding:20px;margin:18px 0;border-radius:12px;break-inside:avoid}}a{{color:#79e4f2}}p,li{{line-height:1.5}}.badge{{font-weight:bold;color:#79e4f2}}.table-scroll{{overflow-x:auto}}table{{border-collapse:collapse;width:100%;font-size:15px}}td,th{{padding:8px;border:1px solid #64778b;text-align:left;vertical-align:top}}@media print{{body{{background:white;color:black}}main{{padding:0}}article{{background:white;border:1px solid #777}}#system-review{{display:none}}}}</style></head>
 <body><main><p class="badge">CAD-DERIVED · COORDINATED SECTIONS</p><h1>Review several changes together</h1>
 <p>{escape(counts)}</p><p>Cyan: original reference. Green: accepted geometric proposal. Grey: obstacle approximations.
 Each section retains its endpoints and pipe diameter. Source CAD is unchanged. Proposed pieces need designer review.</p>
