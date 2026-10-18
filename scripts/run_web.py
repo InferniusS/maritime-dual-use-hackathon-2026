@@ -196,6 +196,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.run_layout(payload)
             elif self.path == "/api/autocad/inspect":
                 self.inspect_autocad(payload)
+            elif self.path == "/api/autocad/review":
+                self.review_autocad(payload)
             elif self.path in ("/api/cad-sample", "/api/import-cad"):
                 self.import_cad(payload)
             elif self.path == "/api/prepare-cad-layout":
@@ -286,6 +288,29 @@ class Handler(BaseHTTPRequestHandler):
         if not source.is_file():
             raise ValueError("The imported drawing was not found. Import it again in this workspace.")
         return identifier, json.loads(source.read_text(encoding="utf-8"))
+
+    def review_autocad(self, payload):
+        from pipe_router.autocad import validate_snapshot_request
+        from pipe_router.drawing_review import inspect_drawing_snapshot, write_drawing_review
+
+        request = validate_snapshot_request(payload, drawing_review=True)
+        identifier = uuid.uuid4().hex
+        folder = self.workspace.output / identifier
+        folder.mkdir()
+        source = folder / request["filename"]
+        source.write_bytes(request["content"])
+        cad, summary = inspect_drawing_snapshot(source, source_units=request["source_units"],
+            document=request["document"], system_type=payload.get("system_type", "pressurized"),
+            clearance=payload.get("clearance", 50.8), padding=payload.get("padding", 500),
+            rule_profile=payload.get("rule_profile", "fmg-v3"), model_context=payload.get("model_context"),
+            engineering=payload.get("engineering"), reverse_flow=payload.get("reverse_flow", False),
+            min_slope=payload.get("min_slope", 0.01))
+        (folder / "cad-inspection.json").write_text(json.dumps(cad, allow_nan=False), encoding="utf-8")
+        response = {**summary, "cad_id": identifier, "exports": {name: f"/downloads/{identifier}/{filename}"
+            for name, filename in (("json", "result.json"), ("report", "report.html"), ("excel", "route-review.xlsx"))}}
+        (folder / "result.json").write_text(json.dumps(response, indent=2, allow_nan=False), encoding="utf-8")
+        write_drawing_review(response, folder)
+        self.send_json(200, response)
 
     def prepare_cad_layout(self, payload):
         from pipe_router.cad_layout import prepare_cad_layout

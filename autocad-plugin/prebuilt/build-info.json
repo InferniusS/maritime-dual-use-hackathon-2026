@@ -6,17 +6,22 @@
   "sdk_version": "10.0.402",
   "autodesk_reference_package": "AutoCAD.NET 26.0.0",
   "command": "dotnet build autocad-plugin/Maritime.AutoCAD.csproj -c Release -p:DebugType=None",
-  "dll_sha256": "9ce0f8c749fc476ecfc573f2f8413061678b24ed6b926753ade60d3bb4dc6226",
+  "dll_sha256": "d66de69d75605470def34cd04037f461707ba900aef91ecfbfe447bd8035d203",
   "source_sha256": {
     "autocad-plugin/Maritime.AutoCAD.csproj": "25934cc9a6fa53a3decbd00759bccd3ececf07e99a18123fb8c336c2351ed6b1",
-    "autocad-plugin/AssemblyPreview.cs": "9fc76e2ddac490cbd23cf05d0c957bee10958e5121f6771c5064162f733a8e1c",
-    "autocad-plugin/CadCommand.cs": "bc7e0aba5815449054dcdf82d0f98c685c4cde45b7306bd46c03dc92afed9f15",
+    "autocad-plugin/AssemblyPreview.cs": "ec88c5f6b2d110ad1aa348728ac5376c1b20c65dbd12e7ac21467f2c1546b29c",
+    "autocad-plugin/CadCommand.cs": "6441855a2a8ef7848e2e33f65dfb2ee1687184a470a6e19cd5a734c7da439a5a",
     "autocad-plugin/PreviewCommand.cs": "01cc30bbc12ad967fe3dad97c8595e22b2175d6657df661eb552f1e0859f6e37"
   },
   "build_warnings": 0,
   "build_errors": 0,
   "autocad_runtime_verified": false,
-  "runtime_check_needed": "Run MARITIMEDEMO, 3D Original/Proposal/Both, Save, MARITIMEVIEW and Undo in AutoCAD 2027 on Snapdragon with the matching rounded_pipe_proposal Python service. Previous centerline and V3 profile runs are confirmed there; this new 3D mesh build has compiled and passed Mac engine/API/export checks but needs its live AutoCAD run.",
+  "runtime_check_needed": "Run the new MARITIMEREVIEW command on the Snapdragon with the matching drawing_review Python service. Confirm listed section selection, fixed connections, 3D Save, MARITIMEVIEW, Excel output and Undo. The previous rounded demo display, Save and comparison toggles were confirmed in venue screenshots; this updated command and framing build have compiled and passed Mac engine/API/export checks but need a live AutoCAD rehearsal.",
   "bundled_autodesk_runtime_assemblies": false,
-  "build_feature": "Rounded 3D pressure-pipe proposals, physical bend checks, component review schedule and five controlled demo cases"
+  "build_feature": "Drawing screening with MARITIMEREVIEW, generated-piece checks and automatic 3D comparison framing",
+  "previous_venue_evidence": [
+    "Rounded synthetic demo displayed",
+    "3D comparison saved",
+    "MARITIMEVIEW Original/Proposal/Both displayed"
+  ]
 }

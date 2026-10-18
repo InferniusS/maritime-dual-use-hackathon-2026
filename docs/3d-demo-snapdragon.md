@@ -1,6 +1,6 @@
 # Test the 3D pipe proposal on the Snapdragon
 
-This iteration adds physical-width review meshes with rounded bends. It can display the original and proposed route separately, save the proposal into AutoCAD, and export a proposed cut list with coordinates. It does not replace source CAD objects or turn the result into approved catalog fittings.
+The current build adds drawing screening with `MARITIMEREVIEW`, measured proposed-piece checks and automatic framing to the working 3D comparison. Follow the update steps below, then use the [pitch demo guide](pitch-demo.md) for the supplied-drawing workflow. The rounded meshes and geometric schedule remain review output, not approved catalog fittings.
 
 The quickest visible demonstration is `MARITIMEDEMO` with the congested-room example below. It is an explicitly synthetic test, separate from the real cooling-drawing test. The original room fixture deliberately includes an unnecessary detour.
 
@@ -48,9 +48,10 @@ Open [the local health page](http://127.0.0.1:8767/api/health) on the **Snapdrag
 
 ```text
 rounded_pipe_proposal
+drawing_review
 ```
 
-If it is absent, stop the Python process, confirm that `pipe_router` was updated in this same folder, and restart it. Opening this address on the Mac checks the Mac service, not the Snapdragon.
+If either is absent, stop the Python process, confirm that `pipe_router` was updated in this same folder, and restart it. Opening this address on the Mac checks the Mac service, not the Snapdragon.
 
 ## 3. Load the new DLL
 

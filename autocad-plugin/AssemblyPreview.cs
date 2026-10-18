@@ -55,6 +55,8 @@ public sealed partial class PreviewCommand
         if (document is null) return;
         try
         {
+            if (!document.Database.TileMode)
+                throw new InvalidOperationException("Switch to the Model tab before comparing saved pipe geometry.");
             var choice = AskKeyword(document.Editor, "Show saved review geometry", ["Original", "Proposal", "Both"], "Both");
             if (choice is null) return;
             using var transaction = document.Database.TransactionManager.StartTransaction();
@@ -68,7 +70,27 @@ public sealed partial class PreviewCommand
                 if (layer.IsLocked || layer.IsFrozen) throw new InvalidOperationException($"Make {name} unlocked and thawed first.");
                 layer.IsOff = name == ReferenceMeshLayer ? choice == "Proposal" : choice == "Original";
             }
+            var points = new List<Point3d>();
+            var visibleReviewItems = 0;
+            var blocks = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+            var model = (BlockTableRecord)transaction.GetObject(blocks[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+            foreach (ObjectId id in model)
+            {
+                if (id.IsErased || transaction.GetObject(id, OpenMode.ForRead) is not Entity entity) continue;
+                if (entity.Layer != ProposalMeshLayer && entity.Layer != ReferenceMeshLayer && entity.Layer != DemoSceneLayer) continue;
+                var layer = (LayerTableRecord)transaction.GetObject(entity.LayerId, OpenMode.ForRead);
+                if (layer.IsOff) continue;
+                try
+                {
+                    var extents = entity.GeometricExtents; points.Add(extents.MinPoint); points.Add(extents.MaxPoint);
+                    if (entity.Layer == ProposalMeshLayer || entity.Layer == ReferenceMeshLayer) visibleReviewItems++;
+                }
+                catch (Autodesk.AutoCAD.Runtime.Exception) { }
+            }
+            if (visibleReviewItems == 0)
+                throw new InvalidOperationException("No visible saved 3D review geometry exists for this choice. Save a new 3D comparison first.");
             transaction.Commit();
+            FrameMeshReview(document, points);
             document.Editor.Regen();
             document.Editor.WriteMessage("\nChanged review layers only. Source CAD objects remain visible and unchanged. Cyan is the original envelope; green is the proposal.");
         }
@@ -90,6 +112,9 @@ public sealed partial class PreviewCommand
     {
         if (result["assembly"] is not JsonObject assembly || assembly["status"]?.GetValue<string>() != "ready") return false;
         if (Text(assembly, "units") != "mm") throw new InvalidOperationException("The physical proposal must use millimetres.");
+        if (assembly["manufacturing_assessment"] is JsonObject physicalReview &&
+            (physicalReview["status"]?.GetValue<string>() == "blocked" || Number(physicalReview, "blocking_failure_count") > 0))
+            throw new InvalidOperationException("The proposed-piece checks contain a blocking failure. No 3D proposal will be saved; inspect the report.");
         var diameter = Number(assembly, "outer_diameter_mm");
         if (Math.Abs(diameter - Number(layout["pipe"]!, "diameter")) > 0.0001)
             throw new InvalidOperationException("The physical proposal changed the pipe diameter.");
@@ -105,6 +130,7 @@ public sealed partial class PreviewCommand
         metadata["outer_diameter_mm"] = diameter;
         metadata["bend_radius_mm"] = assembly["bend_radius_mm"]?.DeepClone();
         metadata["assembly_metrics"] = assembly["metrics"]?.DeepClone();
+        metadata["manufacturing_counts"] = assembly["manufacturing_assessment"]?["counts"]?.DeepClone();
         metadata["synthetic_demo"] = demo;
         var editor = document.Editor;
         editor.WriteMessage($"\n3D outer-envelope proposal: diameter {diameter:0.###} mm; bend radius {Number(assembly, "bend_radius_mm"):0.###} mm.");
@@ -119,6 +145,8 @@ public sealed partial class PreviewCommand
             foreach (var (field, label) in labels)
                 if (metrics[field] is not null) editor.WriteMessage($"\n{label}: {metrics[field]}");
         }
+        if (assembly["manufacturing_assessment"]?["counts"] is JsonObject pieceChecks)
+            editor.WriteMessage($"\nProposed-piece checks: {pieceChecks["pass"]} pass, {pieceChecks["fail"]} fail, {pieceChecks["needs_review"]} need review. Catalogue selection and fabrication approval still need designer review.");
         editor.WriteMessage("\nGreen shows the rounded proposal at actual outside diameter. Cyan is the original reference for comparison; its representation is described in the report. These meshes are review geometry; catalog selection and fabrication approval remain open.");
         if (demo) editor.WriteMessage("\nGrey boxes are the synthetic obstacle envelopes used by the search.");
         var manager = TransientManager.CurrentTransientManager;
@@ -129,7 +157,7 @@ public sealed partial class PreviewCommand
         var saved = false;
         try
         {
-            FrameMeshReview(document, allPoints, demo);
+            FrameMeshReview(document, allPoints);
             var mode = "Both";
             while (true)
             {
@@ -182,7 +210,7 @@ public sealed partial class PreviewCommand
         using var previousView = document.Editor.GetCurrentView();
         try
         {
-            FrameMeshReview(document, reference.Concat(scene).SelectMany(p => p.Vertices).ToArray(), true);
+            FrameMeshReview(document, reference.Concat(scene).SelectMany(p => p.Vertices).ToArray());
             foreach (var part in scene.Concat(reference))
             {
                 var mesh = BuildMesh(part, 1, scene.Contains(part) ? (short)8 : (short)4);
@@ -353,20 +381,23 @@ public sealed partial class PreviewCommand
         dictionary.SetAt("MARITIME_SOURCE", record); transaction.AddNewlyCreatedDBObject(record, true);
     }
 
-    private static void FrameMeshReview(Document document, IReadOnlyList<Point3d> points, bool demo)
+    private static void FrameMeshReview(Document document, IReadOnlyList<Point3d> points)
     {
         using var view = document.Editor.GetCurrentView();
         using var transaction = document.Database.TransactionManager.StartTransaction();
         var styles = (DBDictionary)transaction.GetObject(document.Database.VisualStyleDictionaryId, OpenMode.ForRead);
         if (styles.Contains("Conceptual")) view.VisualStyleId = styles.GetAt("Conceptual");
-        if (demo && points.Count > 0)
+        if (points.Count > 0)
         {
             var min = new Point3d(points.Min(p => p.X), points.Min(p => p.Y), points.Min(p => p.Z));
             var max = new Point3d(points.Max(p => p.X), points.Max(p => p.Y), points.Max(p => p.Z));
-            var aspect = Math.Max(0.5, view.Width / Math.Max(1, view.Height));
+            var aspect = Math.Clamp(view.Width / Math.Max(1e-9, view.Height), 0.1, 10);
             view.Target = new Point3d((min.X+max.X)/2,(min.Y+max.Y)/2,(min.Z+max.Z)/2);
             view.ViewDirection = new Vector3d(-1,-1,1); view.ViewTwist = 0; view.CenterPoint = Point2d.Origin; view.PerspectiveEnabled = false;
-            view.Height = Math.Max(1000, min.DistanceTo(max)*1.25); view.Width = view.Height * aspect;
+            // A bounding sphere fits in both portrait and landscape viewports. Coordinates
+            // are already converted to drawing units, so do not impose a millimetre-sized floor.
+            var diameter = Math.Max(0.001, min.DistanceTo(max) * 1.25);
+            view.Height = diameter / Math.Min(1, aspect); view.Width = view.Height * aspect;
         }
         document.Editor.SetCurrentView(view);
     }

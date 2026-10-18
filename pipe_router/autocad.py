@@ -25,7 +25,7 @@ def service_health():
     return {
         "service": "maritime-pipe-router",
         "api_version": API_VERSION,
-        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel", "rounded_pipe_proposal"],
+        "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel", "rounded_pipe_proposal", "drawing_review"],
         "units": "mm",
     }
 
@@ -53,12 +53,12 @@ def decode_dxf_upload(payload):
     return filename, content
 
 
-def validate_snapshot_request(payload):
+def validate_snapshot_request(payload, *, drawing_review=False):
     source_units = payload.get("source_units")
     if source_units not in ("mm", "m", "in"):
         raise ValueError("Choose mm, m or in for source units")
-    handles = payload.get("selected_handles")
-    if not isinstance(handles, list) or not 1 <= len(handles) <= MAX_SELECTED_HANDLES:
+    handles = [] if drawing_review else payload.get("selected_handles")
+    if not isinstance(handles, list) or not (0 if drawing_review else 1) <= len(handles) <= MAX_SELECTED_HANDLES:
         raise ValueError("Select between 1 and 256 source entities in AutoCAD")
     selected = []
     for handle in handles:

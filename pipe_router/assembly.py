@@ -10,6 +10,7 @@ from copy import deepcopy
 import math
 
 from . import core
+from .assembly_checks import assess_generated_components
 from .model_context import prepare_allowed_space_predicate, validate_allowed_spaces
 from .workflow import normalize_layout, _connection_obstacle_allowed
 
@@ -391,12 +392,6 @@ def plan_assembly(layout_mm, points, *, bend_radius_mm=None):
         component["outer_diameter_mm"] = diameter
         component["catalog_verified"] = False
         component["part_number"] = None
-    # Internal component interfaces are proposed joint locations. Endpoints are
-    # fixed connection interfaces too, so short cut pieces cannot hide a close
-    # pair of joints. This is conservative and does not infer existing welds.
-    for component in components:
-        if component["length_mm"] < MIN_PROPOSED_JOINT_SPACING_MM - _TOL:
-            result["findings"].append(_finding("assembly_joint_spacing", "Proposed component interfaces would be less than 25 mm apart along the centerline", component_id=component["id"], length_mm=component["length_mm"]))
     result["findings"].extend(_collision_findings(layout, components, fixed_segments))
     result["findings"].extend(_self_interference_findings(components, diameter))
     combined = []
@@ -426,6 +421,17 @@ def plan_assembly(layout_mm, points, *, bend_radius_mm=None):
                          "bend_count": len(corners), "straight_piece_count": sum(c["kind"] == "straight" for c in components),
                          "proposed_internal_joint_count": max(0, len(components) - 1),
                          "max_arc_chord_error_mm": max((c["chord_error_mm"] for c in components), default=0.0)}
+    # Measure the generated pieces themselves. Source fabrication observations
+    # must not silently certify a changed route; unknown nominal/catalogue
+    # evidence stays visible without turning every prototype into a failure.
+    assessment = assess_generated_components(layout, components)
+    result["manufacturing_assessment"] = assessment
+    for finding in assessment["findings"]:
+        if finding["status"] == "fail" and finding["severity"] == "error":
+            code = "assembly_joint_spacing" if finding["rule_id"] == "proposed_joint_spacing" else f"assembly_{finding['rule_id']}"
+            result["findings"].append(_finding(code, finding["message"],
+                manufacturing_rule_id=finding["rule_id"], component_ids=finding["component_ids"],
+                measured=finding["measured"], required=finding["required"]))
     estimated_vertices = sum((len(c["centerline_points"]) if c["kind"] == "bend" else 2) * RING_SEGMENTS + 2 for c in components)
     if estimated_vertices > MAX_MESH_VERTICES:
         result["findings"].append(_finding("assembly_size_limit", f"The assembly exceeds the {MAX_MESH_VERTICES} mesh-vertex limit"))

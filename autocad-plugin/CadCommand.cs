@@ -41,13 +41,18 @@ public sealed partial class PreviewCommand
             var json = JsonNode.Parse(File.ReadAllText(selected.StringResult)) as JsonObject
                 ?? throw new InvalidOperationException("The context file must be a JSON object.");
             DrawingContexts[fingerprint] = json;
-            editor.WriteMessage("\nContext loaded for this drawing session. Geometry and evidence will be validated when MARITIMECAD prepares the route. Confirm drawing alignment before running.");
+            editor.WriteMessage("\nContext loaded for this drawing session. Geometry and evidence will be validated by MARITIMEREVIEW or MARITIMECAD. Confirm drawing alignment before running.");
         }
         catch (System.Exception exception) { editor.WriteMessage($"\nContext was not loaded: {exception.Message}"); }
     }
 
     [CommandMethod("MARITIMECAD", CommandFlags.Modal)]
-    public static void OptimizeDrawingPipe()
+    public static void OptimizeDrawingPipe() => ReviewDrawing(false);
+
+    [CommandMethod("MARITIMEREVIEW", CommandFlags.Modal)]
+    public static void ReviewDrawingPipes() => ReviewDrawing(true);
+
+    private static void ReviewDrawing(bool wholeDrawing)
     {
         var document = AcApplication.DocumentManager.MdiActiveDocument;
         if (document is null) return;
@@ -56,17 +61,19 @@ public sealed partial class PreviewCommand
         try
         {
             using var client = CreateClient();
-            CheckService(client);
-            var pick = new PromptEntityOptions("\nSelect a pipe solid or its block in model space: ");
-            pick.SetRejectMessage("\nSelect a 3D solid or block reference.");
-            pick.AddAllowedClass(typeof(Solid3d), false);
-            pick.AddAllowedClass(typeof(BlockReference), false);
-            var selected = editor.GetEntity(pick);
-            if (selected.Status != PromptStatus.OK) return;
-
-            string handle;
-            using (var transaction = document.Database.TransactionManager.StartTransaction())
+            CheckService(client, wholeDrawing ? "drawing_review" : null);
+            if (!document.Database.TileMode)
+                throw new InvalidOperationException("Switch to Model space before reviewing pipe geometry.");
+            string? handle = null;
+            if (!wholeDrawing)
             {
+                var pick = new PromptEntityOptions("\nSelect a pipe solid or its block in model space: ");
+                pick.SetRejectMessage("\nSelect a 3D solid or block reference.");
+                pick.AddAllowedClass(typeof(Solid3d), false);
+                pick.AddAllowedClass(typeof(BlockReference), false);
+                var selected = editor.GetEntity(pick);
+                if (selected.Status != PromptStatus.OK) return;
+                using var transaction = document.Database.TransactionManager.StartTransaction();
                 var entity = (Entity)transaction.GetObject(selected.ObjectId, OpenMode.ForRead);
                 var blockTable = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
                 if (entity.OwnerId != blockTable[BlockTableRecord.ModelSpace])
@@ -79,6 +86,8 @@ public sealed partial class PreviewCommand
                 }
                 handle = entity.Handle.ToString();
             }
+            else
+                editor.WriteMessage("\nDrawing review screens supported inferred pipe sections and lists where to investigate. Unrecognized components, branch identity and missing design evidence remain for designer review.");
             var units = AskUnits(editor);
             if (units is null) return;
             var scale = UnitScale(units);
@@ -108,20 +117,38 @@ public sealed partial class PreviewCommand
                 throw new InvalidOperationException("The DXF snapshot exceeds 48 MB. Open a smaller drawing that still includes the surrounding obstacles.");
             var metadata = new { name = Path.GetFileName(document.Name), fingerprint = document.Database.FingerprintGuid.ToString() };
             editor.WriteMessage("\nReading pipe geometry with the local optimizer. Large drawings may take a few minutes.");
-            var inspected = PostJson(client, "/api/autocad/inspect", new
+            var inspectionRequest = new JsonObject
             {
-                filename = "autocad-snapshot.dxf",
-                content_base64 = Convert.ToBase64String(File.ReadAllBytes(snapshot)),
-                source_units = units,
-                selected_handles = new[] { handle },
-                document = metadata
-            });
+                ["filename"] = "autocad-snapshot.dxf",
+                ["content_base64"] = Convert.ToBase64String(File.ReadAllBytes(snapshot)),
+                ["source_units"] = units,
+                ["document"] = JsonSerializer.SerializeToNode(metadata)
+            };
+            if (wholeDrawing)
+            {
+                inspectionRequest["system_type"] = system == "Gravity" ? "gravity" : "pressurized";
+                inspectionRequest["clearance"] = clearance;
+                inspectionRequest["padding"] = padding;
+                inspectionRequest["reverse_flow"] = reverse;
+                inspectionRequest["min_slope"] = slope;
+                inspectionRequest["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified";
+                AddDrawingContext(inspectionRequest, metadata.fingerprint);
+            }
+            else inspectionRequest["selected_handles"] = new JsonArray(JsonValue.Create(handle));
+            var inspected = PostJson(client, wholeDrawing ? "/api/autocad/review" : "/api/autocad/inspect", inspectionRequest);
             if (Number(inspected, "api_version") != 1 || Text(inspected, "units") != "mm")
                 throw new InvalidOperationException("The snapshot response uses an unsupported protocol or unit.");
             var cadId = Text(inspected, "cad_id");
             var snapshotHash = Text(inspected, "source_sha256");
             var choices = inspected["candidates"] as JsonArray ?? throw new InvalidOperationException("No candidate list was returned.");
-            if (choices.Count == 0) throw new InvalidOperationException("No supported pipe run was found for this selection.");
+            if (wholeDrawing) WriteDrawingReview(editor, inspected);
+            if (choices.Count == 0)
+            {
+                if (!wholeDrawing) throw new InvalidOperationException("No supported pipe run was found for this selection.");
+                editor.WriteMessage("\nNo selectable pipe section was identified. Review the report for unsupported geometry and missing evidence.");
+                return;
+            }
+            if (choices.Count > 50) throw new InvalidOperationException("The local service returned more than 50 selectable routes. Update the service.");
             editor.WriteMessage("\nThese routes are inferred from geometry. Pipe identity and branch connections still need review.");
             WriteMessages(editor, inspected["warnings"], "Drawing note", 8);
             for (var index = 0; index < choices.Count; index++)
@@ -129,6 +156,8 @@ public sealed partial class PreviewCommand
                 var item = choices[index] ?? throw new InvalidOperationException("An empty candidate was returned.");
                 editor.WriteMessage($"\n{index + 1}: {Text(item, "label")} | {Number(item, "member_count"):0} component(s) | " +
                     $"{Number(item, "length_mm"):0.###} mm long | inferred diameter {Number(item, "diameter_mm"):0.###} mm");
+                if (wholeDrawing)
+                    editor.WriteMessage($"\n   {ReviewStatusLabel(Text(item, "review_status"))}: {Text(item, "review_message")}");
             }
             var choice = editor.GetInteger(new PromptIntegerOptions("\nChoose the route number")
             {
@@ -143,11 +172,7 @@ public sealed partial class PreviewCommand
                 ["clearance"] = clearance, ["padding"] = padding, ["reverse_flow"] = reverse,
                 ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
             };
-            if (DrawingContexts.TryGetValue(metadata.fingerprint, out var contextFile))
-            {
-                request["model_context"] = (contextFile["model_context"] ?? contextFile).DeepClone();
-                if (contextFile["engineering"] is JsonObject engineering) request["engineering"] = engineering.DeepClone();
-            }
+            AddDrawingContext(request, metadata.fingerprint);
             var prepared = PostJson(client, "/api/prepare-cad-layout", request);
             var layout = RequiredLayout(prepared);
             VerifySnapshotContext(layout, metadata.fingerprint, snapshotHash);
@@ -158,7 +183,7 @@ public sealed partial class PreviewCommand
                 editor.WriteMessage($"\nPipe-shaped envelopes: {coverage["pipe_shaped_obstacles"]}. " +
                     $"Fallback boxes: {coverage["fallback_box_obstacles"]}.");
             if (!ShowComparedPreview(document, original.Select(p => Scale(p, scale)).ToList(), null,
-                "Cyan is the inferred route to be checked. Verify its start, end and included components.", false, null)) return;
+                "Cyan is the inferred route to be checked. Verify its start, end and included components.", false, null, wholeDrawing)) return;
 
             var contacts = layout["cad_context"]?["endpoint_contacts"] as JsonArray;
             if (contacts is { Count: > 0 })
@@ -214,18 +239,53 @@ public sealed partial class PreviewCommand
         }
     }
 
+    private static void AddDrawingContext(JsonObject request, string fingerprint)
+    {
+        if (!DrawingContexts.TryGetValue(fingerprint, out var contextFile)) return;
+        request["model_context"] = (contextFile["model_context"] ?? contextFile).DeepClone();
+        if (contextFile["engineering"] is JsonObject engineering) request["engineering"] = engineering.DeepClone();
+    }
+
+    private static string ReviewStatusLabel(string status) => status switch
+    {
+        "attention" => "Issues found",
+        "opportunity" => "Potential routing improvement",
+        "no_obvious_detour" => "No obvious detour in screening",
+        "needs_review" => "Designer review needed",
+        "not_reviewed" => "Not screened",
+        _ => throw new InvalidOperationException("The drawing review returned an unknown route status.")
+    };
+
+    private static void WriteDrawingReview(Editor editor, JsonObject inspected)
+    {
+        var review = inspected["review"] as JsonObject ?? throw new InvalidOperationException("The service returned no drawing review summary.");
+        editor.WriteMessage($"\nDrawing screening: {Number(review, "reviewed_routes"):0} of {Number(review, "total_supported_routes"):0} supported sections reviewed; {Number(review, "unreviewed_routes"):0} remain unscreened.");
+        editor.WriteMessage($"\nCoverage: {Text(review, "coverage")}. Screening is not an optimality or full-compliance certificate.");
+        if (review["counts"] is JsonObject counts)
+            foreach (var entry in counts)
+                editor.WriteMessage($"\n{ReviewStatusLabel(entry.Key)}: {entry.Value}");
+        WriteMessages(editor, review["limitations"], "Review limit", 4);
+        if (inspected["exports"] is JsonObject exports)
+            foreach (var export in exports)
+                if (export.Value?.GetValue<string>() is string path && path.StartsWith("/downloads/", StringComparison.Ordinal))
+                    editor.WriteMessage($"\nDrawing review {export.Key}: {ServiceUrl}{path}");
+        editor.WriteMessage("\nChoose one section below to inspect and optimize. Escape finishes the review without adding geometry.");
+    }
+
     private static HttpClient CreateClient() => new(new SocketsHttpHandler
     {
         // Do not reuse a socket while the single-request Python handler closes it.
         PooledConnectionLifetime = TimeSpan.Zero
     }) { Timeout = TimeSpan.FromMinutes(5), BaseAddress = new Uri(ServiceUrl) };
 
-    private static void CheckService(HttpClient client)
+    private static void CheckService(HttpClient client, string? requiredCapability = null)
     {
         var json = SendServiceJson(client, HttpMethod.Get, "/api/health");
         if (json["capabilities"] is not JsonArray capabilities || !capabilities.Any(value => value?.GetValue<string>() == "challenge_rules_v3") ||
             !capabilities.Any(value => value?.GetValue<string>() == "rounded_pipe_proposal"))
             throw new InvalidOperationException("Update and restart the Python service. This plugin needs challenge_rules_v3 and rounded_pipe_proposal support.");
+        if (requiredCapability is not null && !capabilities.Any(value => value?.GetValue<string>() == requiredCapability))
+            throw new InvalidOperationException($"Update and restart the Python service. This command needs {requiredCapability} support.");
         if (Text(json, "service") != "maritime-pipe-router" || Number(json, "api_version") != 1 || Text(json, "units") != "mm")
             throw new InvalidOperationException("The local service is not a compatible Maritime optimizer. Update and restart the Python service.");
     }
@@ -410,14 +470,16 @@ public sealed partial class PreviewCommand
     }
 
     private static bool ShowComparedPreview(Document document, IReadOnlyList<Point3d> baseline,
-        IReadOnlyList<Point3d>? suggestion, string message, bool allowSave, JsonObject? metadata)
+        IReadOnlyList<Point3d>? suggestion, string message, bool allowSave, JsonObject? metadata, bool focus = false)
     {
         var editor = document.Editor;
+        using var previousView = focus ? editor.GetCurrentView() : null;
         var manager = TransientManager.CurrentTransientManager;
         var viewports = new IntegerCollection();
         var previews = new List<Line>();
         try
         {
+            if (focus) FrameMeshReview(document, baseline);
             AddPreview(baseline, 4);
             if (suggestion is not null) AddPreview(suggestion, 3);
             editor.Regen();
@@ -445,7 +507,11 @@ public sealed partial class PreviewCommand
                 try { line.Dispose(); }
                 catch (System.Exception) { cleanupFailed = true; }
             }
-            try { editor.Regen(); }
+            try
+            {
+                if (previousView is not null) editor.SetCurrentView(previousView);
+                editor.Regen();
+            }
             catch (System.Exception) { cleanupFailed = true; }
             if (cleanupFailed)
             {

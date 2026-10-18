@@ -37,6 +37,19 @@ def challenge_panel(result):
             '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div></details></section>')
 
 
+def _measurement_text(value):
+    if value is None:
+        return 'Not measured'
+    if isinstance(value, float):
+        return f'{value:,.3f}'.rstrip('0').rstrip('.')
+    if isinstance(value, dict):
+        return '; '.join(f"{str(key).replace('_', ' ')}: {_measurement_text(item)}" for key, item in value.items())
+    if isinstance(value, (tuple, list)):
+        shown = ' | '.join(_measurement_text(item) for item in value[:8])
+        return shown + (f' | {len(value)-8} more records in the full result' if len(value) > 8 else '')
+    return str(value)
+
+
 def assembly_panel(result):
     """Describe generated geometry without presenting it as catalog parts."""
     assembly = result.get('assembly')
@@ -73,9 +86,25 @@ def assembly_panel(result):
              'For bends, it is centerline arc length. Connections, wall thickness and fabrication allowances require review. All coordinates and lengths are mm.</p>'
              '<div style="overflow-x:auto"><table><thead><tr><th>ID</th><th>Geometry</th><th>Length</th><th>Radius</th><th>Angle °</th><th>Start XYZ</th><th>End XYZ</th>'
              '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div></details>') if rows else ''
+    piece_review = assembly.get('manufacturing_assessment') or {}
+    piece_panel = ''
+    if piece_review:
+        counts = piece_review['counts']
+        check_rows = []
+        for item in piece_review['findings']:
+            values = [item['rule_id'].replace('_', ' ').capitalize(), item['status'].replace('_', ' ').capitalize(),
+                      item['message'], _measurement_text(item.get('measured'))]
+            check_rows.append('<tr>' + ''.join('<td>' + html.escape(str(value)) + '</td>' for value in values) + '</tr>')
+        piece_panel = ('<h3>Checks measured on the proposed pieces</h3><p>'
+            + f"{counts['pass']} passed · {counts['fail']} failed · {counts['needs_review']} need review. "
+            + 'These measurements describe the generated pieces. They do not approve catalog fittings, weld design or fabrication.</p><p>'
+            + html.escape(piece_review['piece_definition'])
+            + '</p><details><summary>Measured piece checks and remaining decisions</summary><div style="overflow-x:auto"><table><thead><tr>'
+            + '<th>Check</th><th>Result</th><th>Finding</th><th>Measurement</th></tr></thead><tbody>'
+            + ''.join(check_rows) + '</tbody></table></div></details>')
     return ('<section class="panel"><h2>' + title + '</h2>'
             + ''.join('<p>' + html.escape(item) + '</p>' for item in details)
-            + ('<ul>' + findings + '</ul>' if findings else '') + table + '</section>')
+            + ('<ul>' + findings + '</ul>' if findings else '') + piece_panel + table + '</section>')
 
 
 def _text(value):
@@ -178,6 +207,26 @@ def write_review_xlsx(layout, result, destination):
             components.append(['No accepted rounded assembly', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '',
                                'Blocked. Do not use intermediate components as a parts list.'])
         sheets.append(('Proposed assembly', components))
+        piece_review = assembly.get('manufacturing_assessment') or {}
+        if piece_review:
+            summary.append(['Proposed-piece checks', piece_review['counts']])
+            checks = [['Check', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Proposed piece IDs', 'Evidence basis']]
+            for item in piece_review['findings']:
+                checks.append([item['rule_id'], item['status'], item['severity'], item['message'], item.get('measured'),
+                               item.get('required'), item.get('component_ids', []), item.get('evidence_basis', '')])
+            sheets.append(('Proposed piece checks', checks))
+            joints = [['Interface ID', 'Type', 'X mm', 'Y mm', 'Z mm', 'Status']]
+            if accepted:
+                for joint in piece_review['joint_locations']:
+                    joints.append([joint['id'], joint['kind'], *joint['point_mm'], 'Proposed interface only. Weld and mating design require review.'])
+            else:
+                joints.append(['No accepted proposal', '', '', '', '', 'Blocked; do not implement intermediate interfaces.'])
+            sheets.append(('Proposed interfaces', joints))
+    write_workbook(sheets, destination)
+
+
+def write_workbook(sheets, destination):
+    """Write a small review workbook using literal cells, never source formulas."""
     main_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
     rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
     package_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'

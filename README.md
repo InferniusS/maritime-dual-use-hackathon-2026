@@ -2,7 +2,7 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status:** the team has run the AutoCAD plugin and V3 Challenge report on the Snapdragon. The new [3D pipe proposal iteration](docs/assembly-iteration.md) adds visible pipe-width geometry with rounded bends, a before/after toggle, dimension labels and a geometric component schedule. Five controlled examples passed on the Mac. The new 3D commands still need a live Snapdragon run. The browser and earlier centerline workflow remain available.
+**Current status:** the team has displayed and saved the 3D pipe comparison on the Snapdragon. This [pitch iteration](docs/final-hackathon-iteration.md) adds `MARITIMEREVIEW`: drawing screening, a numbered list of sections to investigate, measured proposed-piece checks and clearer review exports. The new command still needs a venue rehearsal. The [90-second pitch guide](docs/pitch-demo.md) gives the exact workflow and submission steps.
 
 ## Start with AutoCAD
 
@@ -13,7 +13,7 @@ The [plugin guide](autocad-plugin/README.md) explains the commands and optional 
 1. Download or clone this repo on the AutoCAD laptop.
 2. Install the Python environment and start the local service.
 3. Load `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` through `NETLOAD` in AutoCAD 2027 for Windows. Rebuilding from source is also supported.
-4. For the visible demo, create an empty drawing and run `MARITIMEDEMO` with `examples/assembly/01-congested-room.json`. For a real drawing, run `MARITIMECAD` to select a pipe solid or block, then review the chosen route.
+4. For a supplied drawing, run `MARITIMEREVIEW`, read its coverage and choose a listed section. `MARITIMECAD` remains available to select one known pipe. For the labeled synthetic fallback, use an empty drawing and `MARITIMEDEMO` with `examples/assembly/01-congested-room.json`.
 
 The Python service runs on the same laptop. You do not need to open the website or upload the drawing through a browser. AutoCAD sends a temporary DXF snapshot to the local service.
 
@@ -21,7 +21,11 @@ The Python service runs on the same laptop. You do not need to open the website 
 
 ## What this iteration adds
 
-The earlier iteration saved a thin green centerline. This one can generate straight pipe envelopes and circular bends at the selected outside diameter. It rejects rounding that cannot fit the fixed ends or supplied surroundings. It compares bounded alternatives by rounded bend count, vertical runs, then rounded length.
+The new drawing review screens up to 50 inferred sections, flags geometry and rule concerns, identifies potential detours and reports exactly what remains unreviewed. It reuses the drawing geometry during screening, then sends the chosen section through the existing connection review, rounded search and Save flow. It does not call an unsearched section optimal or treat endpoint contacts as automatically permissible.
+
+Proposed-piece checks now measure lengths, interface spacing, bend counts, angles and planarity from the generated geometry. Verified nominal-size evidence enables radius and straight-between-bends checks. Missing commercial fittings, joint design and installation evidence remain review items. AutoCAD now frames the selected 3D proposal and saved comparison automatically.
+
+The previous visible iteration generates straight pipe envelopes and circular bends at the selected outside diameter. It rejects rounding that cannot fit the fixed ends or supplied surroundings. It compares bounded alternatives by rounded bend count, vertical runs, then rounded length.
 
 The new controlled congested-room example changes from about **17.0767 m and four rounded bends** to **13.4199 m and two rounded bends**, with fixed connections preserved. It is labeled synthetic: the source drawing was not secretly damaged or presented as having that defect. Other cases cover a collision repair, a blocked search, an elevation change and an unchanged valid route.
 

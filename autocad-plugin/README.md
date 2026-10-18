@@ -4,7 +4,7 @@ This plugin brings the existing Python pipe router into AutoCAD. AutoCAD handles
 
 The website does not need to be open. Both the plugin and browser app use the same calculation code.
 
-**For the new build follow the [3D Snapdragon guide](../docs/3d-demo-snapdragon.md).** It covers the update, five controlled cases, physical-width 3D comparisons and Save. The earlier line test, real drawing Save and V3 rule report have run on the venue laptop. This new 3D mesh build still needs its live AutoCAD check. The [original setup guide](../docs/snapdragon-guide.md) remains available for fresh installations.
+**Update with the [Snapdragon guide](../docs/3d-demo-snapdragon.md), then follow the [pitch workflow](../docs/pitch-demo.md).** The team has displayed and saved the 3D comparison at the venue. This build adds `MARITIMEREVIEW`, proposed-piece findings and automatic framing; those changes need a new live rehearsal. The [original setup guide](../docs/snapdragon-guide.md) remains available for fresh installations.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ The website does not need to be open. Both the plugin and browser app use the sa
 - Standard Python 3.14.x for the local service
 - The .NET 10 SDK only if you want to rebuild the plugin
 
-The DLL targets an x64 AutoCAD process. It has loaded and saved results from both the simple line and real solid workflows on the Snapdragon laptop. This confirms those paths on the tested installation. The new rounded mesh display and Save, context workflow and Undo need explicit venue checks.
+The DLL targets an x64 AutoCAD process. The simple line, real solid and rounded demo comparison have run on the tested Snapdragon installation. The new drawing review, context workflow and Undo need explicit venue checks.
 
 AutoCAD for Mac cannot load this managed .NET plugin. The Mac can run the Python service and browser tests. It can also compile the Windows DLL using the official Autodesk reference package.
 
@@ -56,7 +56,7 @@ Keep this window running. The plugin connects to `http://127.0.0.1:8767` on the 
 
 These commands do not require `Activate.ps1` or a PowerShell execution policy change. You can leave the blocked setup script alone.
 
-Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Its capabilities must include `rounded_pipe_proposal`, `challenge_rules_v3`, `model_context` and `review_excel`. If they are missing, update the Python files and restart the service before loading the current DLL.
+Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Its capabilities must include `drawing_review`, `rounded_pipe_proposal`, `challenge_rules_v3`, `model_context` and `review_excel`. If they are missing, update the Python files and restart the service before loading the current DLL.
 
 ## Use the included DLL
 

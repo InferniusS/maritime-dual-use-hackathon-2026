@@ -152,7 +152,7 @@ def _endpoint_contacts(points, boxes, envelope):
 def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=50.0,
                        padding=500.0, reverse_flow=False, endpoint_connections=None,
                        max_stub_length=250.0, rule_profile="prototype-unverified",
-                       model_context=None, engineering=None):
+                       model_context=None, engineering=None, _prepared_geometry=None):
     """Create a single-run test without editing the imported CAD result.
 
     Inputs must be the full importer output already in millimetres. Source
@@ -190,7 +190,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
     matching = [item for item in candidates if isinstance(item, dict) and item.get("id") == candidate_id]
     if not matching and candidate_id.startswith("network:"):
         from .cad_network import inspect_network
-        matching = [item for item in inspect_network(cad)["chains"] if item.get("id") == candidate_id]
+        network = (_prepared_geometry["network"] if _prepared_geometry is not None else inspect_network(cad))
+        matching = [item for item in network["chains"] if item.get("id") == candidate_id]
     if len(matching) != 1:
         raise ValueError(f"Candidate {candidate_id!r} is missing or ambiguous. Choose one of this drawing's candidate runs")
     candidate = matching[0]
@@ -220,7 +221,9 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         "min": [min(point[axis] for point in points) - expansion for axis in range(3)],
         "max": [max(point[axis] for point in points) + expansion for axis in range(3)],
     }
-    all_boxes, extra_counts = _solid_boxes(cad)
+    # An in-process drawing review builds the same immutable geometry once.
+    # This cache is never accepted from an HTTP request or persisted across drawings.
+    all_boxes, extra_counts = (_prepared_geometry["solids"] if _prepared_geometry is not None else _solid_boxes(cad))
     known_keys = {box["key"] for box in all_boxes}
     if not selected.issubset(known_keys):
         raise ValueError("Selected candidate source geometry is missing from this import. Use the full CAD result before testing")
