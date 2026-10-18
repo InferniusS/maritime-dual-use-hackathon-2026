@@ -131,7 +131,7 @@ def review_drawing(cad, *, system_type="pressurized", clearance=50.8, padding=50
         "Intended endpoint connections are not automatically waived. Inspect the selected route and confirm its fixed connections.",
         "No obvious detour means no coordinate backtracking, not a proof of optimality. An opportunity is not a proven saving.",
         "Missing specifications, nominal sizes, required spaces and source evidence remain designer review items.",
-        "Only one selected section is optimized and saved at a time. This is not simultaneous whole-network optimization.",
+        "This screen does not optimize routes. MARITIMEREVIEW selects one section; MARITIMEOPTIMIZE coordinates up to twelve explicitly selected sections. Neither certifies the entire system.",
         "Local search padding is not an approved ship space. Supply aligned model context to check permitted spaces.",
         "The screening time budget is checked between sections, not a hard deadline for drawing extraction or one complex section.",
     ]
@@ -187,13 +187,19 @@ def write_drawing_review(summary, folder):
             return ', '.join(str(item) for item in value)
         return value
     table = ''.join('<tr>' + ''.join('<td>' + e(display(value)) + '</td>' for value in row[:9]) + '</tr>' for row in rows[1:])
+    print_cards = ''.join('<article><h3>Route ' + str(index) + ' · ' + e(item['label']) + '</h3><p><strong>Source handles: '
+        + e(display(item['source_handles'])) + '</strong></p><p>' + e(STATUS_LABELS[item['review_status']]) + ' · '
+        + e(item['review_message']) + '</p><p>Length ' + e(display(item['length_mm'])) + ' mm · OD '
+        + e(display(item['diameter_mm'])) + ' mm · Endpoint contacts ' + str(item['endpoint_contact_count'])
+        + '</p><p>Start XYZ mm: ' + e(display(item['start'])) + '<br>End XYZ mm: ' + e(display(item['end'])) + '</p></article>'
+        for index, item in enumerate(summary['candidates'], 1))
     (folder / "report.html").write_text('''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Drawing routing review</title><style>body{font:16px system-ui;margin:0;background:#eef3f7;color:#122b42}main{max-width:1280px;margin:auto;padding:32px}h1{font-size:36px}section{background:white;padding:24px;border-radius:12px;margin:20px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid #d3dde5;padding:12px}th{background:#143852;color:white}a{color:#006b79}.scroll{overflow:auto}.note{color:#455b6b}</style>
+<title>Drawing routing review</title><style>body{font:16px system-ui;margin:0;background:#eef3f7;color:#122b42}main{max-width:1280px;margin:auto;padding:32px}h1{font-size:36px}section{background:white;padding:24px;border-radius:12px;margin:20px 0}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;vertical-align:top;border-bottom:1px solid #d3dde5;padding:12px}th{background:#143852;color:white}a{color:#006b79}.scroll{overflow:auto}.note{color:#455b6b}.print-cards{display:none}@media print{main{padding:0}body{background:white}section{padding:8px}.scroll{display:none}.print-cards{display:block}article{break-inside:avoid;border-bottom:1px solid #888;padding:8px 0}}</style>
 <main><p>MARITIME / DRAWING REVIEW</p><h1>Choose the next pipe section to improve</h1><section><h2>Screening coverage</h2><p>'''
         + f"{review['reviewed_routes']} of {review['total_supported_routes']} supported inferred sections screened. {review['unreviewed_routes']} remain unreviewed."
         + '</p><p>Geometry flags include possible intended connections and conservative obstacle approximations. Review their source before treating them as violations.</p>'
         + '<p><a href="route-review.xlsx">Excel review</a> · <a href="result.json">Full screening result</a></p></section>'
-        + '<section><h2>Source sections</h2><p>Use the same number in AutoCAD MARITIMEREVIEW. The selected section is previewed before any route search.</p><div class="scroll"><table><thead><tr>'
-        + ''.join('<th>' + e(value) + '</th>' for value in rows[0][:9]) + '</tr></thead><tbody>' + table + '</tbody></table></div></section>'
+        + '<section><h2>Source sections</h2><p>Use the same numbers in AutoCAD MARITIMEREVIEW or MARITIMEOPTIMIZE. Selected sections are previewed before route search.</p><div class="scroll"><table><thead><tr>'
+        + ''.join('<th>' + e(value) + '</th>' for value in rows[0][:9]) + '</tr></thead><tbody>' + table + '</tbody></table></div><div class="print-cards">' + print_cards + '</div></section>'
         + '<section><h2>Designer attention</h2><ul>' + ''.join('<li>' + e(item) + '</li>' for item in summary["warnings"])
         + '</ul><p class="note">Snapshot: ' + e(summary["source_sha256"]) + '</p></section></main></html>', encoding="utf-8")

@@ -124,7 +124,7 @@ public sealed partial class PreviewCommand
         }
     }
 
-    [CommandMethod("MARITIMEOPTIMIZE", CommandFlags.Modal)]
+    [CommandMethod("MARITIMELINEOPTIMIZE", CommandFlags.Modal)]
     public static void OptimizeSelectedRoute()
     {
         var document = Application.DocumentManager.MdiActiveDocument;
@@ -136,7 +136,7 @@ public sealed partial class PreviewCommand
         var editor = document.Editor;
         if (!document.Database.TileMode)
         {
-            editor.WriteMessage("\nRun MARITIMEOPTIMIZE in the Model tab. Paper-space routes are not supported.");
+            editor.WriteMessage("\nRun MARITIMELINEOPTIMIZE in the Model tab. Paper-space routes are not supported.");
             return;
         }
         editor.WriteMessage("\nPressure-pipe centerline workflow. Select all surrounding obstacles that this local check must avoid. Entered prototype rules do not establish V3 compliance.");
@@ -323,7 +323,7 @@ public sealed partial class PreviewCommand
                         throw new InvalidOperationException("Closed polylines are not valid single-pipe routes.");
                     for (var i = 0; i + 1 < polyline.NumberOfVertices; i++)
                         if (Math.Abs(polyline.GetBulgeAt(i)) > BulgeTolerance)
-                            throw new InvalidOperationException("Curved polyline segments are not supported by MARITIMEOPTIMIZE. Use MARITIMECAD for supported solid pipe geometry.");
+                            throw new InvalidOperationException("Curved polyline segments are not supported by MARITIMELINEOPTIMIZE. Use MARITIMECAD for supported solid pipe geometry.");
                     paths.Add(Enumerable.Range(0, polyline.NumberOfVertices).Select(polyline.GetPoint3dAt).ToList());
                     break;
                 case Polyline3d polyline3d:

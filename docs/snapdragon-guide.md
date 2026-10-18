@@ -165,7 +165,7 @@ Keep the same test drawing open. Make sure the Python service is still running.
 Enter this in AutoCAD:
 
 ```text
-MARITIMEOPTIMIZE
+MARITIMELINEOPTIMIZE
 ```
 
 Answer its prompts in this order:

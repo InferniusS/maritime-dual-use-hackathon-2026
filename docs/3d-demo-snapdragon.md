@@ -1,6 +1,6 @@
 # Test the 3D pipe proposal on the Snapdragon
 
-The current build adds drawing screening with `MARITIMEREVIEW`, measured proposed-piece checks and automatic framing to the working 3D comparison. Follow the update steps below, then use the [pitch demo guide](pitch-demo.md) for the supplied-drawing workflow. The rounded meshes and geometric schedule remain review output, not approved catalog fittings.
+The current build adds coordinated selected sections with `MARITIMEOPTIMIZE` and report recovery with `MARITIMEREPORT`. Use the [new coordinated test guide](coordinated-snapdragon-test.md) for that workflow. The steps below retain the existing single-section and synthetic demo. Rounded meshes and geometric schedules remain review output, not approved catalog fittings.
 
 The quickest visible demonstration is `MARITIMEDEMO` with the congested-room example below. It is an explicitly synthetic test, separate from the real cooling-drawing test. The original room fixture deliberately includes an unnecessary detour.
 
@@ -49,9 +49,10 @@ Open [the local health page](http://127.0.0.1:8767/api/health) on the **Snapdrag
 ```text
 rounded_pipe_proposal
 drawing_review
+coordinated_sections
 ```
 
-If either is absent, stop the Python process, confirm that `pipe_router` was updated in this same folder, and restart it. Opening this address on the Mac checks the Mac service, not the Snapdragon.
+If any is absent, stop the Python process, confirm that `pipe_router` was updated in this same folder, and restart it. Opening this address on the Mac checks the Mac service, not the Snapdragon.
 
 ## 3. Load the new DLL
 
@@ -180,7 +181,7 @@ This is still one selected non-branching route at a time. It does not automatica
 If a mentor supplies a poor route as connected `LINE` objects or an open straight polyline, use:
 
 ```text
-MARITIMEOPTIMIZE
+MARITIMELINEOPTIMIZE
 ```
 
 1. Select the connected route entities and press Enter.

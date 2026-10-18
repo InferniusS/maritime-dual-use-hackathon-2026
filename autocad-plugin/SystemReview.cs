@@ -1,0 +1,460 @@
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.Colors;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.GraphicsInterface;
+using Autodesk.AutoCAD.Runtime;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using AcApplication = Autodesk.AutoCAD.ApplicationServices.Application;
+
+namespace Maritime.AutoCAD;
+
+public sealed partial class PreviewCommand
+{
+    private const int MaximumCoordinatedSections = 12;
+    private static readonly Dictionary<string, string> LatestReports = new();
+    private static readonly Dictionary<string, (string Url, string CadId, string Hash)> PendingReports = new();
+    private sealed record SectionReview(string CandidateId, JsonObject Metadata,
+        List<MeshPart> Proposal, List<MeshPart> Reference, List<Point3d> Centerline);
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
+
+    [CommandMethod("MARITIMEREPORT", CommandFlags.Modal)]
+    public static void OpenLatestReport()
+    {
+        var document = AcApplication.DocumentManager.MdiActiveDocument;
+        if (document is null) return;
+        var fingerprint = document.Database.FingerprintGuid.ToString();
+        try
+        {
+            if (PendingReports.TryGetValue(fingerprint, out var pending))
+            {
+                using var client = CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(15);
+                var result = SendServiceJson(client, HttpMethod.Get, pending.Url);
+                var state = Text(result, "status");
+                if (state is "pending" or "running")
+                {
+                    document.Editor.WriteMessage("\nThe latest coordinated search is still running. Try MARITIMEREPORT after the local service finishes.");
+                    return;
+                }
+                if (state != "complete") throw new InvalidOperationException(result["error"]?.GetValue<string>() ?? "The latest coordinated search failed.");
+                VerifyBatchContext(document, result, pending.CadId, pending.Hash, fingerprint);
+                RememberReport(document, result);
+                PendingReports.Remove(fingerprint);
+            }
+            if (!LatestReports.TryGetValue(fingerprint, out var path))
+                throw new InvalidOperationException("No report has been created for this drawing in this AutoCAD session. Run MARITIMEREVIEW, MARITIMEOPTIMIZE or MARITIMECAD first.");
+            ValidateReportPath(path);
+            Process.Start(new ProcessStartInfo(ServiceUrl + path) { UseShellExecute = true });
+            document.Editor.WriteMessage($"\nOpened the latest report for this drawing: {ServiceUrl}{path}\nKeep the Python service running while viewing it.");
+        }
+        catch (System.Exception exception) { document.Editor.WriteMessage($"\nReport could not be opened: {exception.Message}"); }
+    }
+
+    private static void RememberReport(Document document, JsonObject response)
+    {
+        if (response["exports"]?["report"] is not JsonValue value || !value.TryGetValue<string>(out var path)) return;
+        ValidateReportPath(path);
+        var fingerprint = document.Database.FingerprintGuid.ToString();
+        LatestReports[fingerprint] = path;
+        PendingReports.Remove(fingerprint);
+    }
+
+    private static void ValidateReportPath(string path)
+    {
+        // The local service may return data, but may not choose an arbitrary program or website to launch.
+        if (!Regex.IsMatch(path, "^/downloads/[a-fA-F0-9]{32}/report\\.html$", RegexOptions.CultureInvariant))
+            throw new InvalidOperationException("The service returned an unsupported local report path.");
+    }
+
+    private static string SourceHandleText(JsonNode candidate) => candidate["source_handles"] is JsonArray handles
+        ? string.Join(", ", handles.Select(item => item?.GetValue<string>() ?? "?")) : "not supplied";
+
+    private static List<int> ParseSectionNumbers(string value, int count, int maximum)
+    {
+        var tokens = value.Split(new[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length == 0 || tokens.Length > maximum)
+            throw new InvalidOperationException($"Enter between 1 and {maximum} route numbers separated by commas.");
+        var numbers = new List<int>();
+        foreach (var token in tokens)
+        {
+            if (!int.TryParse(token, out var number) || number < 1 || number > count)
+                throw new InvalidOperationException($"Each number must be between 1 and {count}.");
+            if (numbers.Contains(number)) throw new InvalidOperationException("Each route may be selected only once.");
+            numbers.Add(number);
+        }
+        return numbers;
+    }
+
+    private static void RunCoordinatedSelection(Document document, HttpClient client, JsonArray candidates,
+        string cadId, string snapshotHash, string fingerprint, double drawingScale, string system,
+        string profile, double clearance, double padding, double grid, bool reverse, double slope)
+    {
+        var editor = document.Editor;
+        List<int> selected;
+        while (true)
+        {
+            var answer = editor.GetString(new PromptStringOptions("\nRoute numbers to coordinate, separated by commas (for example 16,17): ") { AllowSpaces = true });
+            if (answer.Status != PromptStatus.OK) return;
+            try { selected = ParseSectionNumbers(answer.StringResult, candidates.Count, MaximumCoordinatedSections); break; }
+            catch (InvalidOperationException exception) { editor.WriteMessage($"\n{exception.Message}"); }
+        }
+        var sections = new JsonArray();
+        var expectedLayouts = new Dictionary<string, JsonObject>();
+        var selectedCandidates = new Dictionary<string, JsonNode>();
+        foreach (var number in selected)
+        {
+            var candidate = candidates[number - 1] ?? throw new InvalidOperationException("An empty candidate was selected.");
+            var candidateId = Text(candidate, "id");
+            editor.WriteMessage($"\nSection {number}: {Text(candidate, "label")}; source handles {SourceHandleText(candidate)}.");
+            var section = new JsonObject
+            {
+                ["candidate_id"] = candidateId, ["system_type"] = system == "Gravity" ? "gravity" : "pressurized",
+                ["clearance"] = clearance, ["padding"] = padding, ["grid_step"] = grid,
+                ["reverse_flow"] = reverse, ["min_slope"] = slope,
+                ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
+            };
+            AddDrawingContext(section, fingerprint);
+            var prepareRequest = (JsonObject)section.DeepClone();
+            prepareRequest["cad_id"] = cadId;
+            JsonObject layout;
+            try
+            {
+                layout = RequiredLayout(PostJson(client, "/api/prepare-cad-layout", prepareRequest));
+                VerifySnapshotContext(layout, fingerprint, snapshotHash);
+            }
+            catch (InvalidOperationException exception)
+            {
+                editor.WriteMessage($"\nThis section could not be prepared: {exception.Message}\nIt will remain in the batch report as a section requiring review.");
+                sections.Add(section); selectedCandidates[candidateId] = candidate;
+                continue;
+            }
+            var original = ReadPoints(layout["pipe"]?["original_route"], "selected section");
+            if (!ShowComparedPreview(document, original.Select(point => Scale(point, drawingScale)).ToList(), null,
+                $"Cyan shows section {number}. Check both endpoints and the source components before continuing.", false, null, true)) return;
+            try
+            {
+                if (!ChooseSectionConnections(document, client, section, prepareRequest, layout, fingerprint, snapshotHash, out var prepared)) return;
+                layout = prepared;
+            }
+            catch (InvalidOperationException exception)
+            {
+                editor.WriteMessage($"\nThe selected connection assumptions could not be prepared: {exception.Message}\nThis section will remain in the batch report for review; the other selected sections can continue.");
+                sections.Add(section); selectedCandidates[candidateId] = candidate;
+                continue;
+            }
+            if (system == "Pressure")
+            {
+                if (!AskNumber(editor, $"Section {number} bend centerline radius in mm (review assumption)",
+                    Math.Max(304.8, 1.5 * Number(layout["pipe"]!, "diameter")), false, out var radius)) return;
+                section["bend_radius_mm"] = radius;
+            }
+            expectedLayouts[candidateId] = layout;
+            selectedCandidates[candidateId] = candidate;
+            sections.Add(section);
+        }
+        if (sections.Count == 0) return;
+        var confirmation = AskKeyword(editor, $"Coordinate {sections.Count} selected sections with surrounding source geometry", ["Run", "Cancel"], "Run");
+        if (confirmation != "Run") return;
+        var request = new JsonObject
+        {
+            ["cad_id"] = cadId, ["source_sha256"] = snapshotHash,
+            ["document"] = new JsonObject { ["name"] = Path.GetFileName(document.Name), ["fingerprint"] = fingerprint },
+            ["sections"] = sections
+        };
+        var pending = PostJson(client, "/api/autocad/optimize", request);
+        var reply = WaitForSystemJob(document, pending, cadId, snapshotHash);
+        if (reply is null) return;
+        VerifyBatchContext(document, reply, cadId, snapshotHash, fingerprint);
+        RememberReport(document, reply);
+        PendingReports.Remove(fingerprint);
+        var summary = reply["summary"] as JsonObject ?? throw new InvalidOperationException("No coordinated result summary was returned.");
+        if (summary["complete_system_verified"]?.GetValue<bool>() != false)
+            throw new InvalidOperationException("The service did not identify the scope limits of this review.");
+        editor.WriteMessage("\nCoordinated section review finished. The source drawing has not been replaced; only the selected sections were searched.");
+        if (summary["counts"] is JsonObject counts)
+            foreach (var count in counts) editor.WriteMessage($"\n{count.Key}: {count.Value}");
+        if (summary["coverage"] is not null) editor.WriteMessage($"\nCoverage: {summary["coverage"]}");
+        WriteMessages(editor, summary["limitations"], "Review limit", 5);
+        var reviews = ValidateSectionReviews(summary, expectedLayouts, selectedCandidates, fingerprint, snapshotHash, reply);
+        editor.WriteMessage($"\nReport: {ServiceUrl}{Text(reply["exports"]!, "report")}\nUse MARITIMEREPORT to reopen it after this command.");
+        if (reviews.Count == 0)
+        {
+            editor.WriteMessage("\nNo accepted rounded section was returned. No proposal geometry will be saved. The report lists the blocked or unresolved sections.");
+            return;
+        }
+        ShowSystemReview(document, reviews, drawingScale, () => VerifyBatchContext(document, reply, cadId, snapshotHash, fingerprint));
+    }
+
+    private static bool ChooseSectionConnections(Document document, HttpClient client, JsonObject section,
+        JsonObject prepareRequest, JsonObject layout, string fingerprint, string snapshotHash, out JsonObject prepared)
+    {
+        prepared = layout;
+        if (layout["cad_context"]?["endpoint_contacts"] is not JsonArray contacts || contacts.Count == 0) return true;
+        var editor = document.Editor;
+        editor.WriteMessage("\nEnd contacts may be intended connectors or collisions. Select only the contacts whose connections you have verified.");
+        for (var index = 0; index < contacts.Count; index++)
+        {
+            var contact = contacts[index] ?? throw new InvalidOperationException("An empty contact was returned.");
+            editor.WriteMessage($"\nContact {index + 1}: {Text(contact, "endpoint")}, source {Text(contact, "source_handle")} ({Text(contact, "obstacle_id")})");
+        }
+        List<int> accepted;
+        while (true)
+        {
+            var answer = editor.GetString(new PromptStringOptions("\nIntended fixed contact numbers, comma separated; ALL only if every listed contact is intended; Enter for none: ") { AllowSpaces = true });
+            if (answer.Status == PromptStatus.None || answer.Status == PromptStatus.OK && string.IsNullOrWhiteSpace(answer.StringResult)) return true;
+            if (answer.Status != PromptStatus.OK) return false;
+            if (answer.StringResult.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                accepted = Enumerable.Range(1, contacts.Count).ToList(); break;
+            }
+            try { accepted = ParseSectionNumbers(answer.StringResult, contacts.Count, contacts.Count); break; }
+            catch (InvalidOperationException exception) { editor.WriteMessage($"\n{exception.Message}"); }
+        }
+        if (!AskNumber(editor, "Maximum fixed connection length in mm (at most 1000)", 250, false, out var maximum)) return false;
+        if (maximum > 1000) throw new InvalidOperationException("Fixed endpoint assumptions are limited to 1000 mm.");
+        var connections = new Dictionary<string, List<string>>();
+        foreach (var index in accepted)
+        {
+            var contact = contacts[index - 1]!;
+            var endpoint = Text(contact, "endpoint");
+            if (endpoint is not ("start" or "end")) throw new InvalidOperationException("Unknown endpoint contact.");
+            if (!connections.TryGetValue(endpoint, out var values)) connections[endpoint] = values = [];
+            var id = Text(contact, "obstacle_id");
+            if (!values.Contains(id)) values.Add(id);
+        }
+        section["endpoint_connections"] = JsonSerializer.SerializeToNode(connections);
+        section["max_stub_length"] = maximum;
+        prepareRequest["endpoint_connections"] = section["endpoint_connections"]!.DeepClone();
+        prepareRequest["max_stub_length"] = maximum;
+        prepared = RequiredLayout(PostJson(client, "/api/prepare-cad-layout", prepareRequest));
+        VerifySnapshotContext(prepared, fingerprint, snapshotHash);
+        return true;
+    }
+
+    private static JsonObject? WaitForSystemJob(Document document, JsonObject pending, string cadId, string snapshotHash)
+    {
+        if (Number(pending, "api_version") != 1) throw new InvalidOperationException("Unsupported coordinated-search protocol.");
+        var jobId = Text(pending, "job_id");
+        var statusUrl = Text(pending, "status_url");
+        if (!Regex.IsMatch(jobId, "^[a-fA-F0-9]{32}$") || statusUrl != $"/api/system-jobs/{jobId}")
+            throw new InvalidOperationException("The local service returned an invalid search status address.");
+        PendingReports[document.Database.FingerprintGuid.ToString()] = (statusUrl, cadId, snapshotHash);
+        using var client = CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(15);
+        var editor = document.Editor;
+        editor.WriteMessage("\nCoordinating the selected sections. Hold Esc to stop waiting without changing the drawing. The local job may finish in the background.");
+        var stopwatch = Stopwatch.StartNew();
+        string? lastProgress = null;
+        while (stopwatch.Elapsed < TimeSpan.FromMinutes(10))
+        {
+            if ((GetAsyncKeyState(0x1B) & 0x8000) != 0)
+            {
+                editor.WriteMessage("\nStopped waiting. No coordinated proposal was saved. Use MARITIMEREPORT after the local service finishes to view its result. Wait for it to finish before starting another run.");
+                return null;
+            }
+            var response = SendServiceJson(client, HttpMethod.Get, statusUrl);
+            if (Number(response, "api_version") != 1) throw new InvalidOperationException("Unsupported search response protocol.");
+            var status = Text(response, "status");
+            if (status == "complete") return response;
+            if (status == "failed") throw new InvalidOperationException(response["error"]?.GetValue<string>() ?? "The coordinated search failed. Check the Python service window.");
+            if (status is not ("pending" or "running")) throw new InvalidOperationException("Unknown coordinated search state.");
+            if (response["progress"] is JsonObject progress)
+            {
+                var message = $"{progress["completed"]}/{progress["total"]} sections processed: {progress["message"]}";
+                if (message != lastProgress) { editor.WriteMessage($"\n{message}"); lastProgress = message; }
+            }
+            for (var step = 0; step < 4; step++)
+            {
+                Thread.Sleep(250);
+                if ((GetAsyncKeyState(0x1B) & 0x8000) != 0) break;
+            }
+        }
+        throw new InvalidOperationException("The coordinated search did not finish within ten minutes. No geometry was saved. Check the local service before restarting.");
+    }
+
+    private static void VerifyBatchContext(Document document, JsonObject reply, string cadId, string hash, string fingerprint)
+    {
+        if (Text(reply, "cad_id") != cadId || Text(reply, "source_sha256") != hash ||
+            reply["document"]?["fingerprint"]?.GetValue<string>() != fingerprint ||
+            document.Database.FingerprintGuid.ToString() != fingerprint || AcApplication.DocumentManager.MdiActiveDocument != document)
+            throw new InvalidOperationException("This coordinated result does not match the active drawing snapshot.");
+    }
+
+    private static List<SectionReview> ValidateSectionReviews(JsonObject summary, Dictionary<string, JsonObject> expected,
+        Dictionary<string, JsonNode> selected, string fingerprint, string snapshotHash, JsonObject response)
+    {
+        if (summary["routes"] is not JsonArray routes || routes.Count != selected.Count || routes.Count > MaximumCoordinatedSections)
+            throw new InvalidOperationException("The coordinated result omitted a selected section or exceeded the batch limit.");
+        var seen = new HashSet<string>();
+        var reviews = new List<SectionReview>();
+        foreach (var route in routes)
+        {
+            if (route is not JsonObject item) throw new InvalidOperationException("An empty coordinated result was returned.");
+            var id = Text(item, "candidate_id");
+            if (!selected.ContainsKey(id) || !seen.Add(id)) throw new InvalidOperationException("An unexpected or duplicate section was returned.");
+            var status = Text(item, "status");
+            AcApplication.DocumentManager.MdiActiveDocument.Editor.WriteMessage($"\n{item["label"] ?? JsonValue.Create(id)}: {status}. {item["message"]}");
+            if (status is "blocked" or "needs_review" or "not_processed") continue;
+            if (status is not ("proposed" or "unchanged")) throw new InvalidOperationException("Unknown coordinated section outcome.");
+            if (item["coordination"]?["accepted"]?.GetValue<bool>() != true ||
+                item["coordination"]?["original_geometry_revalidated"]?.GetValue<bool>() != true ||
+                item["coordination"]?["pair_clearance_revalidated"]?.GetValue<bool>() != true)
+                throw new InvalidOperationException("A section was accepted without final source-geometry and pair-clearance checks.");
+            if (!expected.TryGetValue(id, out var originalLayout)) throw new InvalidOperationException("A section was accepted without a verified local preview.");
+            if (item["layout"] is not JsonObject layout || item["result"] is not JsonObject result)
+                throw new InvalidOperationException("An accepted section has no layout or result.");
+            VerifySnapshotContext(layout, fingerprint, snapshotHash);
+            if (layout["cad_context"]?["candidate_id"]?.GetValue<string>() != id)
+                throw new InvalidOperationException("A coordinated section changed its source identity.");
+            var expectedHandles = originalLayout["cad_context"]?["source_handles"] as JsonArray;
+            var returnedHandles = layout["cad_context"]?["source_handles"] as JsonArray;
+            if (expectedHandles is null || returnedHandles is null ||
+                !expectedHandles.Select(value => value?.GetValue<string>()).Order().SequenceEqual(returnedHandles.Select(value => value?.GetValue<string>()).Order()))
+                throw new InvalidOperationException("A coordinated section changed its source handles.");
+            if (Text(result, "units") != "mm" || Text(layout, "units") != "mm") throw new InvalidOperationException("Coordinated results must use millimetres.");
+            if (Math.Abs(Number(layout["pipe"]!, "diameter") - Number(originalLayout["pipe"]!, "diameter")) > 0.0001)
+                throw new InvalidOperationException("The coordinated search changed a selected diameter.");
+            var original = ReadPoints(originalLayout["pipe"]?["original_route"], "selected source section");
+            var baseline = ReadPoints(result["original"]?["points"], "returned source section");
+            if (baseline.Count != original.Count || baseline.Where((point, index) => point.DistanceTo(original[index]) > 0.0001).Any())
+                throw new InvalidOperationException("A coordinated result changed its original reference.");
+            if (result["candidate"]?["valid"]?.GetValue<bool>() != true) throw new InvalidOperationException("An accepted section failed its geometric checks.");
+            var points = ReadPoints(result["candidate"]?["points"], "coordinated proposal");
+            if (points[0].DistanceTo(original[0]) > 0.0001 || points[^1].DistanceTo(original[^1]) > 0.0001)
+                throw new InvalidOperationException("A coordinated proposal moved a fixed endpoint.");
+            ValidateFixedStubs(originalLayout, points);
+            if (result["assembly"] is not JsonObject assembly || Text(assembly, "status") != "ready" || Text(assembly, "units") != "mm")
+                throw new InvalidOperationException("An accepted section has no checked rounded geometry.");
+            if (assembly["manufacturing_assessment"] is not JsonObject assessment ||
+                assessment["status"]?.GetValue<string>() == "blocked" || Number(assessment, "blocking_failure_count") > 0)
+                throw new InvalidOperationException("An accepted section contains a blocking proposed-piece finding.");
+            var diameter = Number(assembly, "outer_diameter_mm");
+            if (Math.Abs(diameter - Number(originalLayout["pipe"]!, "diameter")) > 0.0001)
+                throw new InvalidOperationException("A rounded section changed its diameter.");
+            var centerline = ReadPoints(assembly["centerline_points"], "rounded section");
+            if (centerline[0].DistanceTo(original[0]) > 0.0001 || centerline[^1].DistanceTo(original[^1]) > 0.0001)
+                throw new InvalidOperationException("A rounded section moved a fixed endpoint.");
+            var proposal = ReadMeshParts(assembly["meshes"], "section proposal");
+            var reference = ReadMeshParts(assembly["reference_meshes"], "section reference");
+            if (proposal.Count == 0 || reference.Count == 0) throw new InvalidOperationException("An accepted section has no comparison meshes.");
+            var metadata = new JsonObject
+            {
+                ["candidate_id"] = id, ["source_handles"] = selected[id]["source_handles"]?.DeepClone(),
+                ["cad_id"] = response["cad_id"]?.DeepClone(),
+                ["drawing_fingerprint"] = fingerprint, ["source_snapshot_sha256"] = snapshotHash,
+                ["status"] = status, ["result_url"] = response["exports"]?["json"]?.DeepClone(),
+                ["representation"] = "outer_envelope_mesh", ["catalog_verified"] = false,
+                ["outer_diameter_mm"] = diameter, ["bend_radius_mm"] = assembly["bend_radius_mm"]?.DeepClone(),
+                ["assembly_metrics"] = assembly["metrics"]?.DeepClone(),
+                ["manufacturing_counts"] = assembly["manufacturing_assessment"]?["counts"]?.DeepClone(),
+                ["complete_system_verified"] = false, ["synthetic_demo"] = false
+            };
+            reviews.Add(new SectionReview(id, metadata, proposal, reference, centerline));
+        }
+        return reviews;
+    }
+
+    private static void ShowSystemReview(Document document, IReadOnlyList<SectionReview> reviews, double drawingScale, Action verifyContext)
+    {
+        var editor = document.Editor;
+        var manager = TransientManager.CurrentTransientManager;
+        var viewports = new IntegerCollection();
+        var transient = new List<SubDMesh>();
+        var allParts = reviews.SelectMany(section => section.Proposal.Concat(section.Reference)).ToList();
+        if (allParts.Sum(part => (long)part.Vertices.Length) > 1000000)
+            throw new InvalidOperationException("This combined preview is too large. Review fewer sections together.");
+        using var previousView = editor.GetCurrentView();
+        var saved = false;
+        try
+        {
+            FrameMeshReview(document, allParts.SelectMany(part => part.Vertices).Select(point => Scale(point, drawingScale)).ToArray());
+            editor.WriteMessage($"\nCombined 3D review for {reviews.Count} accepted sections: cyan original reference, green checked proposal. Source CAD remains visible. Unchanged outcomes are identified in the report; green does not mean every section improved.");
+            var mode = "Both";
+            while (true)
+            {
+                ClearTransientMeshes(manager, viewports, transient);
+                foreach (var section in reviews)
+                {
+                    if (mode != "Proposal") Add(section.Reference, 4);
+                    if (mode != "Original") Add(section.Proposal, 3);
+                }
+                editor.Regen();
+                var selected = AskKeyword(editor, "Compare selected sections; Save keeps this combined review", ["Original", "Proposal", "Both", "Save", "Discard"], "Save");
+                if (selected is null || selected == "Discard") return;
+                if (selected == "Save")
+                {
+                    verifyContext();
+                    SaveSystemReview(document, reviews, drawingScale);
+                    saved = true;
+                    return;
+                }
+                mode = selected;
+            }
+        }
+        finally
+        {
+            ClearTransientMeshes(manager, viewports, transient);
+            if (!saved) editor.SetCurrentView(previousView);
+            editor.Regen();
+        }
+        void Add(IEnumerable<MeshPart> parts, short color)
+        {
+            foreach (var part in parts)
+            {
+                var mesh = BuildMesh(part, drawingScale, color);
+                if (!manager.AddTransient(mesh, TransientDrawingMode.Main, 128, viewports))
+                {
+                    mesh.Dispose(); throw new InvalidOperationException("AutoCAD could not display the combined comparison.");
+                }
+                transient.Add(mesh);
+            }
+        }
+    }
+
+    private static void SaveSystemReview(Document document, IReadOnlyList<SectionReview> sections, double drawingScale)
+    {
+        // One transaction and the modal command keep the entire accepted set atomic and undoable.
+        using var transaction = document.Database.TransactionManager.StartTransaction();
+        var blocks = (BlockTable)transaction.GetObject(document.Database.BlockTableId, OpenMode.ForRead);
+        var model = (BlockTableRecord)transaction.GetObject(blocks[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+        var proposalLayer = GetReviewLayer(document.Database, transaction, ProposalMeshLayer, 3);
+        var referenceLayer = GetReviewLayer(document.Database, transaction, ReferenceMeshLayer, 4);
+        var centerlineLayer = GetReviewLayer(document.Database, transaction, SuggestionLayer, 3);
+        foreach (var section in sections)
+        {
+            Add(section.Proposal, proposalLayer, 3, "proposal", section.Metadata);
+            Add(section.Reference, referenceLayer, 4, "original_reference", section.Metadata);
+            using var line = new Polyline3d(Poly3dType.SimplePoly,
+                new Point3dCollection(section.Centerline.Select(point => Scale(point, drawingScale)).ToArray()), false);
+            line.SetDatabaseDefaults(document.Database); line.LayerId = centerlineLayer;
+            line.Color = Color.FromColorIndex(ColorMethod.ByAci, 3);
+            model.AppendEntity(line); transaction.AddNewlyCreatedDBObject(line, true);
+            var metadata = (JsonObject)section.Metadata.DeepClone(); metadata["role"] = "proposal_centerline";
+            WriteReviewMetadata(line, transaction, metadata);
+        }
+        transaction.Commit();
+        document.Editor.WriteMessage($"\nSaved one combined comparison for {sections.Count} accepted sections, with separate source identity and centerlines. Source pipe objects were not replaced. One UNDO removes this comparison. Use MARITIMEVIEW to switch views and MARITIMEREPORT for outcomes. Save this drawing under a new name to keep the review.");
+        void Add(IEnumerable<MeshPart> parts, ObjectId layer, short color, string role, JsonObject metadata)
+        {
+            foreach (var part in parts)
+            {
+                using var mesh = BuildMesh(part, drawingScale, color);
+                mesh.SetDatabaseDefaults(document.Database); mesh.LayerId = layer;
+                mesh.Color = Color.FromColorIndex(ColorMethod.ByAci, color);
+                model.AppendEntity(mesh); transaction.AddNewlyCreatedDBObject(mesh, true);
+                var record = (JsonObject)metadata.DeepClone();
+                record["part_id"] = part.Id; record["part_kind"] = part.Kind; record["role"] = role;
+                WriteReviewMetadata(mesh, transaction, record);
+            }
+        }
+    }
+}

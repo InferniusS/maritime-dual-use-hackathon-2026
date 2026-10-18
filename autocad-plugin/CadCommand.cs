@@ -52,7 +52,10 @@ public sealed partial class PreviewCommand
     [CommandMethod("MARITIMEREVIEW", CommandFlags.Modal)]
     public static void ReviewDrawingPipes() => ReviewDrawing(true);
 
-    private static void ReviewDrawing(bool wholeDrawing)
+    [CommandMethod("MARITIMEOPTIMIZE", CommandFlags.Modal)]
+    public static void OptimizeDrawingSections() => ReviewDrawing(true, true);
+
+    private static void ReviewDrawing(bool wholeDrawing, bool coordinated = false)
     {
         var document = AcApplication.DocumentManager.MdiActiveDocument;
         if (document is null) return;
@@ -61,7 +64,7 @@ public sealed partial class PreviewCommand
         try
         {
             using var client = CreateClient();
-            CheckService(client, wholeDrawing ? "drawing_review" : null);
+            CheckService(client, coordinated ? "coordinated_sections" : wholeDrawing ? "drawing_review" : null);
             if (!document.Database.TileMode)
                 throw new InvalidOperationException("Switch to Model space before reviewing pipe geometry.");
             string? handle = null;
@@ -141,7 +144,8 @@ public sealed partial class PreviewCommand
             var cadId = Text(inspected, "cad_id");
             var snapshotHash = Text(inspected, "source_sha256");
             var choices = inspected["candidates"] as JsonArray ?? throw new InvalidOperationException("No candidate list was returned.");
-            if (wholeDrawing) WriteDrawingReview(editor, inspected);
+            RememberReport(document, inspected);
+            if (wholeDrawing) WriteDrawingReview(editor, inspected, coordinated);
             if (choices.Count == 0)
             {
                 if (!wholeDrawing) throw new InvalidOperationException("No supported pipe run was found for this selection.");
@@ -155,9 +159,15 @@ public sealed partial class PreviewCommand
             {
                 var item = choices[index] ?? throw new InvalidOperationException("An empty candidate was returned.");
                 editor.WriteMessage($"\n{index + 1}: {Text(item, "label")} | {Number(item, "member_count"):0} component(s) | " +
-                    $"{Number(item, "length_mm"):0.###} mm long | inferred diameter {Number(item, "diameter_mm"):0.###} mm");
+                    $"{Number(item, "length_mm"):0.###} mm long | inferred diameter {Number(item, "diameter_mm"):0.###} mm | source handles {SourceHandleText(item)}");
                 if (wholeDrawing)
                     editor.WriteMessage($"\n   {ReviewStatusLabel(Text(item, "review_status"))}: {Text(item, "review_message")}");
+            }
+            if (coordinated)
+            {
+                RunCoordinatedSelection(document, client, choices, cadId, snapshotHash, metadata.fingerprint,
+                    scale, system, profile, clearance, padding, grid, reverse, slope);
+                return;
             }
             var choice = editor.GetInteger(new PromptIntegerOptions("\nChoose the route number")
             {
@@ -256,7 +266,7 @@ public sealed partial class PreviewCommand
         _ => throw new InvalidOperationException("The drawing review returned an unknown route status.")
     };
 
-    private static void WriteDrawingReview(Editor editor, JsonObject inspected)
+    private static void WriteDrawingReview(Editor editor, JsonObject inspected, bool coordinated = false)
     {
         var review = inspected["review"] as JsonObject ?? throw new InvalidOperationException("The service returned no drawing review summary.");
         editor.WriteMessage($"\nDrawing screening: {Number(review, "reviewed_routes"):0} of {Number(review, "total_supported_routes"):0} supported sections reviewed; {Number(review, "unreviewed_routes"):0} remain unscreened.");
@@ -269,7 +279,10 @@ public sealed partial class PreviewCommand
             foreach (var export in exports)
                 if (export.Value?.GetValue<string>() is string path && path.StartsWith("/downloads/", StringComparison.Ordinal))
                     editor.WriteMessage($"\nDrawing review {export.Key}: {ServiceUrl}{path}");
-        editor.WriteMessage("\nChoose one section below to inspect and optimize. Escape finishes the review without adding geometry.");
+        editor.WriteMessage(coordinated
+            ? "\nChoose up to 12 sections from the first 50 listed candidates. This is a bounded multi-section review, not a complete-system redesign."
+            : "\nChoose one section below to inspect and optimize. Escape finishes the review without adding geometry.");
+        editor.WriteMessage("\nUse MARITIMEREPORT after this command to reopen the latest report.");
     }
 
     private static HttpClient CreateClient() => new(new SocketsHttpHandler
@@ -360,6 +373,7 @@ public sealed partial class PreviewCommand
         var editor = document.Editor;
         editor.WriteMessage("\nChecking the original route and searching for a replacement locally.");
         var reply = PostJson(client, "/api/run", new { layout });
+        RememberReport(document, reply);
         var result = reply["result"] as JsonObject ?? throw new InvalidOperationException("The optimizer returned no result.");
         if (Text(result, "units") != "mm") throw new InvalidOperationException("The optimizer result must use millimetres.");
         var status = Text(result, "status");

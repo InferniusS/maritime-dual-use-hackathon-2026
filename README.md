@@ -2,7 +2,7 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status:** the team has displayed and saved the 3D pipe comparison on the Snapdragon. This [pitch iteration](docs/final-hackathon-iteration.md) adds `MARITIMEREVIEW`: drawing screening, a numbered list of sections to investigate, measured proposed-piece checks and clearer review exports. The new command still needs a venue rehearsal. The [90-second pitch guide](docs/pitch-demo.md) gives the exact workflow and submission steps.
+**Current status:** the team has displayed and saved a rounded proposal in the supplied cooling drawing on the Snapdragon. The newest build adds `MARITIMEOPTIMIZE` for coordinated review of up to twelve selected sections, and `MARITIMEREPORT` to reopen results. Follow the [new Snapdragon test guide](docs/coordinated-snapdragon-test.md). The coordinated command needs its own Windows rehearsal. This is a bounded review plugin, not a complete network or fabrication system.
 
 ## Start with AutoCAD
 
@@ -17,9 +17,13 @@ The [plugin guide](autocad-plugin/README.md) explains the commands and optional 
 
 The Python service runs on the same laptop. You do not need to open the website or upload the drawing through a browser. AutoCAD sends a temporary DXF snapshot to the local service.
 
-`MARITIMEVIEW` switches saved review layers between Original, Proposal and Both. `MARITIMEPREVIEW` and `MARITIMEOPTIMIZE` remain available for line and polyline tests; the latter can also request a rounded pressure-pipe proposal. Saved proposals are separate review geometry. They do not replace the source pipe solids.
+`MARITIMEVIEW` switches saved review layers between Original, Proposal and Both. `MARITIMEPREVIEW` and `MARITIMELINEOPTIMIZE` are available for line and polyline tests; the latter can also request a rounded pressure-pipe proposal. `MARITIMEOPTIMIZE` now coordinates sections from actual CAD solids. Saved proposals are separate review geometry. They do not replace the source pipe solids.
 
 ## What this iteration adds
+
+Coordinated runs keep every requested outcome visible. Accepted proposals reserve their full pipe width and the larger requested pair clearance before later sections are searched. A final pair check rejects mutual clashes. Source objects, endpoints and diameters are preserved. Combined 3D comparison, section identity, generated-piece coordinates and rule findings are exported together. This remains order-dependent selected-section search; branches and the entire model are not silently treated as solved.
+
+Fresh CAD acceptance now exercises uploaded DXF geometry through extraction and search, including repair, unchanged and refusal cases, translated block placement and a joined nine-component detour. [Native AutoCAD scripts](examples/cad-acceptance/README.md) are included for the venue runtime test. Synthetic fixtures are labeled and do not guarantee unseen judge files.
 
 The new drawing review screens up to 50 inferred sections, flags geometry and rule concerns, identifies potential detours and reports exactly what remains unreviewed. It reuses the drawing geometry during screening, then sends the chosen section through the existing connection review, rounded search and Save flow. It does not call an unsearched section optimal or treat endpoint contacts as automatically permissible.
 

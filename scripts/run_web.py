@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from datetime import datetime, timezone
 from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +32,8 @@ class Workspace:
         self.cad_samples = {str(i): Path(path).resolve() for i, path in enumerate(paths)}
         self.cad_sample = next(iter(self.cad_samples.values()), None)
         self.plotly = get_plotlyjs().encode("utf-8")
+        self.system_jobs = {}
+        self.jobs_lock = threading.Lock()
         manifest = json.loads((ROOT / "examples/scenarios.json").read_text())
         self.scenarios = {record["id"]: {**record, "path": ROOT / "examples" / record["layout"]} for record in manifest["scenarios"]}
         self.scenarios["gravity-drain"] = {
@@ -92,6 +95,15 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/health":
                 from pipe_router.autocad import service_health
                 self.send_json(200, service_health())
+            elif path.startswith("/api/system-jobs/"):
+                identifier = path.removeprefix("/api/system-jobs/")
+                if not re_identifier(identifier):
+                    return self.fail(404, "Unknown optimization job")
+                with self.workspace.jobs_lock:
+                    job = deepcopy(self.workspace.system_jobs.get(identifier))
+                if job is None:
+                    return self.fail(404, "Optimization job not found. It may belong to a previous service session.")
+                self.send_json(200, job)
             elif path == "/api/config":
                 profiles = json.loads((ROOT / "examples/rule-profiles.json").read_text())
                 self.send_json(200, {
@@ -191,6 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(400, str(error))
         if not RUN_LOCK.acquire(blocking=False):
             return self.fail(409, "Another calculation is running. Try again when it finishes.")
+        release_lock = True
         try:
             if self.path == "/api/run":
                 self.run_layout(payload)
@@ -198,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
                 self.inspect_autocad(payload)
             elif self.path == "/api/autocad/review":
                 self.review_autocad(payload)
+            elif self.path == "/api/autocad/optimize":
+                response = self.start_system_optimization(payload)
+                # The worker now owns the calculation lock, including when the
+                # client closes its connection before receiving this response.
+                release_lock = False
+                self.send_json(202, response)
             elif self.path in ("/api/cad-sample", "/api/import-cad"):
                 self.import_cad(payload)
             elif self.path == "/api/prepare-cad-layout":
@@ -215,7 +234,70 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.fail(404, "Unknown action")
         finally:
-            RUN_LOCK.release()
+            if release_lock:
+                RUN_LOCK.release()
+
+    def start_system_optimization(self, payload):
+        """Compute against a cached immutable snapshot, outside the HTTP socket."""
+        from pipe_router.system_optimization import optimize_sections
+        from pipe_router.system_export import write_system_review
+
+        cad_id, cad = self.saved_cad(payload)
+        context = cad.get("autocad_context") or {}
+        source_hash = cad.get("source_sha256")
+        if not context or payload.get("source_sha256") != source_hash:
+            raise ValueError("Snapshot identity changed or is missing. Review this drawing again.")
+        if payload.get("document") != context.get("document"):
+            raise ValueError("The document does not match the reviewed snapshot.")
+        sections = payload.get("sections")
+        if not isinstance(sections, list) or not 1 <= len(sections) <= 12 or any(not isinstance(item, dict) for item in sections):
+            raise ValueError("Choose between 1 and 12 sections from this drawing review.")
+        if any(not isinstance(item.get("candidate_id"), str) or not item["candidate_id"] for item in sections):
+            raise ValueError("Each section needs its source candidate ID.")
+        identifier = uuid.uuid4().hex
+        base = {"api_version": 1, "job_id": identifier, "cad_id": cad_id,
+                "source_sha256": source_hash, "document": deepcopy(context["document"]),
+                "status_url": f"/api/system-jobs/{identifier}"}
+        workspace = self.workspace
+
+        def update(**values):
+            with workspace.jobs_lock:
+                workspace.system_jobs[identifier].update(values)
+
+        def work():
+            try:
+                update(status="running")
+                summary = optimize_sections(cad, sections, progress=lambda value: update(progress=value))
+                for route in summary.get("routes", []):
+                    if isinstance(route.get("layout"), dict):
+                        route["layout"].setdefault("cad_context", {}).update({**context, "cad_id": cad_id})
+                summary.update({"cad_id": cad_id, "document": deepcopy(context["document"]),
+                                "source_sha256": source_hash, "generated_at": datetime.now(timezone.utc).isoformat()})
+                write_system_review(summary, workspace.output / identifier)
+                exports = {name: f"/downloads/{identifier}/{filename}" for name, filename in (
+                    ("json", "result.json"), ("dxf", "route-centerlines.dxf"), ("report", "report.html"), ("excel", "route-review.xlsx"))}
+                update(status="complete", summary=summary, exports=exports)
+            except Exception as error:
+                update(status="failed", error=f"Coordinated review stopped: {type(error).__name__}: {error}")
+                print(f"[{identifier[:8]}] Coordinated review failed: {type(error).__name__}", flush=True)
+            finally:
+                RUN_LOCK.release()
+
+        with workspace.jobs_lock:
+            # Only finished jobs are removed. Their exported files remain local.
+            while len(workspace.system_jobs) >= 32:
+                oldest = next((key for key, job in workspace.system_jobs.items() if job["status"] in ("complete", "failed")), None)
+                if oldest is None:
+                    raise ValueError("Too many active jobs")
+                del workspace.system_jobs[oldest]
+            workspace.system_jobs[identifier] = {**base, "status": "pending", "progress": {"total": len(sections), "completed": 0, "message": "Starting coordinated review"}}
+        try:
+            threading.Thread(target=work, name=f"pipe-sections-{identifier[:8]}", daemon=True).start()
+        except Exception:
+            with workspace.jobs_lock:
+                del workspace.system_jobs[identifier]
+            raise
+        return {**base, "status": "pending"}
 
     def run_layout(self, payload):
         from pipe_router.workflow import run_workflow

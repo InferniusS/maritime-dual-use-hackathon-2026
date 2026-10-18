@@ -109,7 +109,9 @@ If AutoCAD blocks the DLL use a trusted project folder or add that specific fold
 | `MARITIMEDEMO` | Run a labeled synthetic layout in a new empty drawing with full-width before/after geometry |
 | `MARITIMEVIEW` | Show saved Original, Proposal or Both review layers |
 | `MARITIMECONTEXT` | Load, inspect the loaded status or clear reviewed context for the active drawing session |
-| `MARITIMEOPTIMIZE` | Test a route made from selected straight lines or polylines with selected obstacle objects |
+| `MARITIMEOPTIMIZE` | Coordinate up to twelve selected CAD-solid sections, compare and save accepted changes together |
+| `MARITIMEREPORT` | Open the latest local report for the current drawing, including a finished background job |
+| `MARITIMELINEOPTIMIZE` | Test a route made from selected straight lines or polylines with selected obstacle objects |
 | `MARITIMEPREVIEW` | Check that selected line geometry can be shown as a temporary cyan overlay |
 
 ### Real drawing workflow
@@ -155,7 +157,7 @@ Manufacturing and access data must be explicit and tied to the original route. C
 
 ### Simple line workflow
 
-Use `MARITIMEOPTIMIZE` when the intended route already exists as straight line or polyline centerlines.
+Use `MARITIMELINEOPTIMIZE` when the intended route already exists as straight line or polyline centerlines. Use [the coordinated workflow](../docs/coordinated-snapdragon-test.md) for `MARITIMEOPTIMIZE` on CAD-solid sections.
 
 Select one connected route and the obstacles to check. Enter the outside diameter and the clearance. Then choose the search settings and drawing units. The service returns the same comparison preview used by the real drawing command. Improved results also offer Save or Discard.
 
@@ -182,7 +184,7 @@ The simple line and real drawing Save paths are complete on the Snapdragon. The 
 
 Open [line-test.dxf](examples/line-test.dxf) in AutoCAD. This is a clearly synthetic test drawing for checking the plugin controls. It contains one yellow route and one white equipment box.
 
-1. Run `MARITIMEOPTIMIZE` and select the yellow polyline as the route.
+1. Run `MARITIMELINEOPTIMIZE` and select the yellow polyline as the route.
 2. Select the white equipment block as the obstacle. Leave the text label unselected.
 3. Enter diameter `100` and clearance `50`.
 4. Enter grid step `250` and padding `500`.

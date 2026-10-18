@@ -4,6 +4,51 @@ This iteration makes the AutoCAD workflow follow the organizers' 90-second demon
 
 The word "final" refers to the package being prepared for the pitch. It does not establish that every hackathon requirement or withheld test has been passed.
 
+## Latest coordinated build, 18 October
+
+`MARITIMEOPTIMIZE` now prepares up to twelve explicitly selected, non-overlapping
+sections from one drawing snapshot. Each accepted rounded route becomes an
+obstacle for the next, using full outside diameter, arc approximation allowance
+and the larger requested pipe-to-pipe clearance. Final checks repeat source
+obstacle validation and mutual clearance checks. The combined preview and Save
+retain each section's identity; blocked and unresolved sections remain visible
+in the report. The old polyline command is now `MARITIMELINEOPTIMIZE`.
+
+`MARITIMEREPORT` opens the most recent report for the active drawing, including a
+background job that completed after the user stopped waiting. Printed screening
+reports now put source handles and coordinates in cards so the rightmost table
+columns are not clipped.
+
+The real-model screenshot supplied by the team confirms the preceding
+MARITIMEREVIEW workflow saved three green meshes on the cooling drawing. The
+new coordinated command still needs a Snapdragon run. Follow
+[the current test instructions](coordinated-snapdragon-test.md).
+
+New verification distinguishes three kinds of evidence:
+
+- A controlled two-section crossing fixture accepts both routes while the
+  second avoids the first. Fault-injection tests catch ignored obstacles,
+  changed endpoints/diameters and mutual conflicts.
+- Fresh uploaded synthetic DXFs pass through actual import, inference and
+  search. Cases include collision repair, unchanged good routing, rejection of
+  an embedded endpoint, translated block placement and a nine-component detour.
+  The joined detour becomes a 6000 mm straight route. Analytic SAT test fixtures
+  are not an Autodesk-kernel validation; native creation scripts are supplied
+  for the Windows rehearsal.
+- On the real cooling drawing, a two-section run preserves one blocked outcome
+  and accepts DB2/E16/E6D (3597.48 mm, one bend, three geometric pieces). The
+  connector declarations in the Mac replay were test assumptions. Seven other
+  nearby candidates tested under the same limits did not produce a second
+  accepted route. **This is not evidence that multiple real-system sections or
+  the whole cooling network were successfully redesigned.**
+
+The code and exports now support coordinated pressure-section review. Full
+network semantics, source-verified fittings, complete spaces and surroundings,
+supports, installability and rounded pitched systems remain requirements gaps.
+They are not completed merely by a successful green preview. The challenge's
+deck/bulkhead rule is reported correctly as requiring a pipe-diameter direction
+change between two crossings, not a general pipe-diameter distance from a wall.
+
 ## Improvement over the previous iteration
 
 The previous iteration established rounded 3D proposals and before/after views. The team has now displayed and saved those meshes inside AutoCAD on the Snapdragon and used `MARITIMEVIEW` to compare them. This is stronger evidence than the earlier Mac-only build and tests. The observed blank view recovered after changing tabs or display style; its precise cause remains unconfirmed. Undo has not yet been demonstrated by the submitted screenshots.
@@ -34,7 +79,7 @@ A failure of an implemented mandatory generated-geometry check blocks the physic
 - **Needs review** identifies missing evidence or an uncertain interpretation. It is not counted as a pass.
 - **Not reviewed** preserves visibility of coverage limits instead of silently omitting unsupported work.
 
-The drawing review is capped at 50 supported inferred sections. Branches and uncertain chains may not be representable as one supported route. The optimizer still changes one selected non-branching section at a time; it does not automatically reroute the entire ship network.
+The drawing review is capped at 50 supported inferred sections. Branches and uncertain chains may not be representable as one supported route. The coordinated command handles up to twelve selected non-branching sections in order; it does not automatically reroute the entire ship network.
 
 ## Requirements and present evidence
 
@@ -42,8 +87,8 @@ Status refers to the available evidence for the whole requirement. A partial ite
 
 | Hackathon requirement | Status | Available evidence and remaining acceptance |
 | --- | --- | --- |
-| Run on the supplied laptop | Demonstrated for existing workflow | The team has run the local service, plugin and saved 3D comparison on the Snapdragon. The new drawing-review command needs a live run there. |
-| Show improvements in AutoCAD or Navisworks | Demonstrated for synthetic example; partial for required supplied-model demo | The saved synthetic 3D scene and view switching are visible in the team's screenshots. A useful rounded proposal on a connected section of the supplied system still needs venue demonstration. |
+| Run on the supplied laptop | Demonstrated for existing workflow | The team has run the local service, drawing review and saved 3D comparison on the Snapdragon. The new coordinated command needs a live run there. |
+| Show improvements in AutoCAD or Navisworks | Demonstrated for one supplied-model section; partial for full requirement | The team has saved a rounded proposal in the supplied cooling model. Whole-system improvement and complete compliance have not been demonstrated. |
 | Identify routing opportunities and already-good portions | Partial | The new drawing review provides screening outcomes and coverage. Bounded search can retain a valid route. Neither is a proof of global optimality. |
 | Identify violations of the supplied specifications | Partial | The V3 rule report separates pass, fail and review. Some checks need explicit model evidence; unsupported or missing checks remain review. |
 | Minimize direction and elevation changes | Partial | Supported alternatives are ranked using generated rounded bends, vertical runs and length. This is bounded search for a selected section, not simultaneous optimization of the whole network. |
@@ -85,7 +130,7 @@ All 47 screened units had flags that include endpoint contacts and conservative 
 
 The freshly imported DB2 / E16 / E6D section also produced a rounded proposal: **3597.48 mm of centerline, one bend, two straight pieces, and two proposed joints**, preserving its 88.9 mm outside diameter and the explicitly declared fixed end contacts. The selected-route calculation took about 2.33 seconds on the Mac. Its generated-piece assessment recorded **five passes, no failures, five items needing review, and one not-applicable item**. The source route is sampled geometry, so this does not establish a comparable manufactured original or a proven physical length saving.
 
-Final package verification: **710 automated tests passed**. The AutoCAD 2027 plugin built with **zero warnings and zero errors**, and its bundled DLL and source hashes match the build manifest. All five public demonstration scenarios were replayed: detour improvement, collision repair, blocked passage, elevation change, and an unchanged already-good route. These checks supplement the venue evidence; they do not substitute for running the new command in AutoCAD on the Snapdragon.
+The preceding package passed **710 automated tests** and built without warnings or errors. Current package counts and source hashes are recorded in `autocad-plugin/prebuilt/build-info.json`. These checks supplement venue evidence; they do not substitute for running the new command in AutoCAD on the Snapdragon.
 
 ## Final venue acceptance
 
