@@ -224,12 +224,22 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
     # An in-process drawing review builds the same immutable geometry once.
     # This cache is never accepted from an HTTP request or persisted across drawings.
     all_boxes, extra_counts = (_prepared_geometry["solids"] if _prepared_geometry is not None else _solid_boxes(cad))
-    known_keys = {box["key"] for box in all_boxes}
+    solid_index = _prepared_geometry.get("solid_index") if _prepared_geometry is not None else None
+    known_keys = solid_index.by_key.keys() if solid_index is not None else {box["key"] for box in all_boxes}
     if not selected.issubset(known_keys):
         raise ValueError("Selected candidate source geometry is missing from this import. Use the full CAD result before testing")
-    excluded = [box for box in all_boxes if box["key"] in selected]
-    nearby = [box for box in all_boxes if box["key"] not in selected and _overlaps(box, bounds)]
-    if len(nearby) > core.MAX_OBSTACLES:
+    if solid_index is not None:
+        # This index belongs to the current in-process immutable CAD snapshot;
+        # neither it nor prepared geometry is accepted from an HTTP request.
+        if solid_index.boxes is not all_boxes:
+            raise ValueError("The prepared geometry index does not match this snapshot")
+        excluded = [solid_index.by_key[key] for key in sorted(selected)]
+        nearby = [box for box in solid_index.query(bounds) if box["key"] not in selected]
+    else:
+        excluded = [box for box in all_boxes if box["key"] in selected]
+        nearby = [box for box in all_boxes if box["key"] not in selected and _overlaps(box, bounds)]
+    allow_dense_screening = _prepared_geometry is not None and _prepared_geometry.get("screening_batches") is True
+    if len(nearby) > core.MAX_OBSTACLES and not allow_dense_screening:
         raise ValueError(
             f"This local region contains {len(nearby)} obstacle solids. The tester supports at most "
             f"{core.MAX_OBSTACLES}. Reduce search padding or choose a shorter candidate run. No obstacles were dropped."
@@ -321,7 +331,7 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
         result["engineering"] = deepcopy(engineering)
     if model_context is not None:
         from .model_context import apply_model_context
-        result = apply_model_context(result, model_context, cad.get("source_sha256"))
+        result = apply_model_context(result, model_context, cad.get("source_sha256"), _screening_batches=allow_dense_screening)
         # Context geometry participates in contact discovery before connector
         # exemptions are offered. All other obstacles remain active.
         contacts = []

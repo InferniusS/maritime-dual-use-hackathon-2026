@@ -1,5 +1,10 @@
 # Test coordinated pipe sections on the Snapdragon
 
+For the newest full-inventory entry point, start with the
+[whole-drawing guide](whole-drawing-snapdragon-test.md). The instructions below
+describe the earlier quick-review path; coordinated selection from a current
+full scan is no longer limited to its first 50 sections.
+
 This build adds `MARITIMEOPTIMIZE` for several sections of the current CAD drawing.
 The old line/polyline test command is now `MARITIMELINEOPTIMIZE`.
 `MARITIMEREPORT` opens the latest report for the current drawing without searching command history.

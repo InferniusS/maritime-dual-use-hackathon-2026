@@ -63,7 +63,7 @@ public sealed partial class PreviewCommand
             var layers = (LayerTable)transaction.GetObject(document.Database.LayerTableId, OpenMode.ForRead);
             if (!layers.Has(ProposalMeshLayer) || !layers.Has(ReferenceMeshLayer))
                 throw new InvalidOperationException("No saved 3D comparison exists in this drawing. Save a 3D proposal first.");
-            foreach (var name in new[] { ProposalMeshLayer, ReferenceMeshLayer, SuggestionLayer })
+            foreach (var name in new[] { ProposalMeshLayer, ReferenceMeshLayer, SuggestionLayer, ReviewDimensionLayer })
             {
                 if (!layers.Has(name)) continue;
                 var layer = (LayerTableRecord)transaction.GetObject(layers[name], OpenMode.ForWrite);
@@ -77,7 +77,7 @@ public sealed partial class PreviewCommand
             foreach (ObjectId id in model)
             {
                 if (id.IsErased || transaction.GetObject(id, OpenMode.ForRead) is not Entity entity) continue;
-                if (entity.Layer != ProposalMeshLayer && entity.Layer != ReferenceMeshLayer && entity.Layer != DemoSceneLayer) continue;
+                if (entity.Layer != ProposalMeshLayer && entity.Layer != ReferenceMeshLayer && entity.Layer != DemoSceneLayer && entity.Layer != ReviewDimensionLayer) continue;
                 var layer = (LayerTableRecord)transaction.GetObject(entity.LayerId, OpenMode.ForRead);
                 if (layer.IsOff) continue;
                 try
@@ -132,6 +132,9 @@ public sealed partial class PreviewCommand
         metadata["assembly_metrics"] = assembly["metrics"]?.DeepClone();
         metadata["manufacturing_counts"] = assembly["manufacturing_assessment"]?["counts"]?.DeepClone();
         metadata["synthetic_demo"] = demo;
+        metadata["candidate_id"] = layout["cad_context"]?["candidate_id"]?.DeepClone();
+        metadata["source_handles"] = layout["cad_context"]?["source_handles"]?.DeepClone();
+        var dimensions = ReadAssemblyDimensions(assembly);
         var editor = document.Editor;
         editor.WriteMessage($"\n3D outer-envelope proposal: diameter {diameter:0.###} mm; bend radius {Number(assembly, "bend_radius_mm"):0.###} mm.");
         if (assembly["metrics"] is JsonObject metrics)
@@ -171,7 +174,7 @@ public sealed partial class PreviewCommand
                 if (selected is null || selected == "Discard") return true;
                 if (selected == "Save")
                 {
-                    SaveAssembly(document, proposed, reference, scene, centerline, drawingScale, metadata, demo);
+                    SaveAssembly(document, proposed, reference, scene, centerline, dimensions, drawingScale, metadata, demo);
                     saved = true;
                     return true;
                 }
@@ -317,7 +320,7 @@ public sealed partial class PreviewCommand
 
     private static void SaveAssembly(Document document, IReadOnlyList<MeshPart> proposal,
         IReadOnlyList<MeshPart> reference, IReadOnlyList<MeshPart> scene, IReadOnlyList<Point3d> centerline,
-        double drawingScale, JsonObject metadata, bool demo)
+        IReadOnlyList<ReviewDimension> dimensions, double drawingScale, JsonObject metadata, bool demo)
     {
         if (demo) RequireEmptyDemoDrawing(document);
         using var transaction = document.Database.TransactionManager.StartTransaction();
@@ -331,6 +334,7 @@ public sealed partial class PreviewCommand
         route.SetDatabaseDefaults(document.Database); route.LayerId = layerId;
         model.AppendEntity(route); transaction.AddNewlyCreatedDBObject(route, true);
         WriteReviewMetadata(route, transaction, metadata);
+        SaveReviewDimensions(document, transaction, model, dimensions, drawingScale, metadata);
         if (demo)
         {
             document.Database.Insunits = UnitsValue.Millimeters;
@@ -341,6 +345,7 @@ public sealed partial class PreviewCommand
         }
         transaction.Commit();
         document.Editor.WriteMessage($"\nSaved {proposal.Count} green review meshes on {ProposalMeshLayer}, with cyan original reference on {ReferenceMeshLayer}. Use MARITIMEVIEW to switch Original/Proposal/Both. Source objects were not replaced. One UNDO removes this saved comparison.");
+        document.Editor.WriteMessage("\nMeasured piece callouts were saved on MARITIME_REVIEW_DIMENSIONS. Use MARITIMEDIMENSIONS On/Off to show or hide them. They describe review geometry, not fabrication approval.");
         void AddParts(IEnumerable<MeshPart> parts, string layerName, short color, string role)
         {
             var partLayer = GetReviewLayer(document.Database, transaction, layerName, color);

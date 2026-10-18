@@ -10,6 +10,42 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from xml.sax.saxutils import escape
 
 
+EVIDENCE_LABELS = {
+    'computed_geometry': 'Computed from geometry',
+    'supplied_measurement': 'Supplied measurement',
+    'reviewer_declaration': 'Reviewer declaration',
+    'unimplemented': 'Not implemented',
+}
+
+
+def evidence_labels(finding):
+    """Keep finding origin separate from outcome, including older results.
+
+    A pass is never used to infer automatic calculation or complete coverage.
+    Generated-piece reports predate the V3 origin fields; only their explicit
+    evidence_basis is recognized, rather than guessing from measured values.
+    """
+    kind = finding.get('evidence_kind')
+    if kind is not None:
+        return (EVIDENCE_LABELS.get(kind, 'Evidence not classified'),
+                str(finding.get('evidence_completeness', 'not_classified')).replace('_', ' '),
+                finding.get('evidence_note', 'Evidence details were not recorded.'))
+    basis = finding.get('evidence_basis')
+    if basis == 'generated_component_geometry':
+        return ('Computed from generated geometry', 'generated pieces only',
+                'Calculated from the proposed pieces; source completeness, catalog suitability and fabrication approval are separate.')
+    if basis == 'not_provided_for_generated_components':
+        return ('Evidence not provided', 'not provided for generated pieces',
+                'This item has no supporting evidence for the proposed pieces; it is not an automated pass.')
+    return ('Evidence not classified', 'not classified',
+            'This saved result did not record an evidence origin; its outcome does not establish automatic verification.')
+
+
+def _evidence_text(finding):
+    label, completeness, note = evidence_labels(finding)
+    return f'{label}. Coverage: {completeness}. {note}'
+
+
 def challenge_panel(result):
     review = result.get('challenge_review')
     if not review:
@@ -23,17 +59,23 @@ def challenge_panel(result):
             continue
         counts = assessment['counts']
         summaries.append(f"{label}: {counts['pass']} passed, {counts['fail']} failed, {counts['needs_review']} need review")
+        if assessment.get('evidence_counts'):
+            origins = ', '.join(f'{EVIDENCE_LABELS.get(kind, kind)}: {count}'
+                                for kind, count in assessment['evidence_counts'].items())
+            summaries.append(f'{label} finding origins (all outcomes, not passed checks): {origins}')
         for finding in assessment['findings']:
             values = [label, finding.get('id', finding.get('rule_id', '')).replace('_', ' ').capitalize(),
                       finding['status'].replace('_', ' ').capitalize(),
-                      'Mandatory' if finding['severity'] == 'error' else 'Preference', finding['message']]
+                      'Mandatory' if finding['severity'] == 'error' else 'Preference',
+                      _evidence_text(finding), finding['message']]
             rows.append('<tr>' + ''.join('<td>' + html.escape(str(v)) + '</td>' for v in values) + '</tr>')
     return ('<section class="panel"><h2>Challenge rule review</h2>'
             '<p>V3 checks. Missing evidence is marked needs_review. A pass covers the named check and supplied evidence only. '
-            'This is not a finished pipe assembly or full standards approval.</p>'
+            'Supplied measurements and reviewer declarations are not independently extracted or verified in CAD. '
+            'Computed geometry covers the recorded inputs only. This is not a finished pipe assembly or full standards approval.</p>'
             '<p>' + html.escape(' · '.join(summaries)) + '</p>'
             '<p><a href="route-review.xlsx">Download Excel review</a></p>'
-            '<details><summary>Show all rule findings</summary><div style="overflow-x:auto"><table><thead><tr><th>Route</th><th>Rule</th><th>Result</th><th>Rule type</th><th>Finding</th>'
+            '<details><summary>Show all rule findings</summary><div style="overflow-x:auto"><table><thead><tr><th>Route</th><th>Rule</th><th>Result</th><th>Rule type</th><th>Evidence</th><th>Finding</th>'
             '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div></details></section>')
 
 
@@ -93,14 +135,14 @@ def assembly_panel(result):
         check_rows = []
         for item in piece_review['findings']:
             values = [item['rule_id'].replace('_', ' ').capitalize(), item['status'].replace('_', ' ').capitalize(),
-                      item['message'], _measurement_text(item.get('measured'))]
+                      _evidence_text(item), item['message'], _measurement_text(item.get('measured'))]
             check_rows.append('<tr>' + ''.join('<td>' + html.escape(str(value)) + '</td>' for value in values) + '</tr>')
-        piece_panel = ('<h3>Checks measured on the proposed pieces</h3><p>'
+        piece_panel = ('<h3>Proposed-piece checks and missing evidence</h3><p>'
             + f"{counts['pass']} passed · {counts['fail']} failed · {counts['needs_review']} need review. "
             + 'These measurements describe the generated pieces. They do not approve catalog fittings, weld design or fabrication.</p><p>'
             + html.escape(piece_review['piece_definition'])
             + '</p><details><summary>Measured piece checks and remaining decisions</summary><div style="overflow-x:auto"><table><thead><tr>'
-            + '<th>Check</th><th>Result</th><th>Finding</th><th>Measurement</th></tr></thead><tbody>'
+            + '<th>Check</th><th>Result</th><th>Evidence</th><th>Finding</th><th>Measurement</th></tr></thead><tbody>'
             + ''.join(check_rows) + '</tbody></table></div></details>')
     return ('<section class="panel"><h2>' + title + '</h2>'
             + ''.join('<p>' + html.escape(item) + '</p>' for item in details)
@@ -155,13 +197,21 @@ def write_review_xlsx(layout, result, destination):
         ['Model context', layout.get('model_context', {}).get('coordinate_frame', {})],
         ['Full engineering compliance', 'Not verified'],
     ]
-    findings = [['Route', 'Rule', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Source', 'Component references']]
+    findings = [['Route', 'Rule', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Source', 'Component references',
+                 'Evidence kind', 'Evidence completeness', 'Evidence note']]
     review = result.get('challenge_review', {})
     for key in ('original', 'candidate'):
-        for item in (review.get(key) or {}).get('findings', []):
+        assessment = review.get(key) or {}
+        label = 'rejected_candidate' if key == 'candidate' and not result.get('candidate') else key
+        if assessment.get('evidence_counts'):
+            summary.append([f'{label} finding origins (all outcomes)', assessment['evidence_counts']])
+            summary.append([f'{label} outcomes by evidence origin', assessment.get('evidence_status_counts', {})])
+            summary.append([f'{label} evidence count scope', assessment.get('evidence_counts_note', '')])
+        for item in assessment.get('findings', []):
             label = 'rejected_candidate' if key == 'candidate' and not result.get('candidate') else key
             findings.append([label, item.get('id', item.get('rule_id', '')), item['status'], item['severity'], item['message'],
-                             item.get('measured'), item.get('required'), item.get('source'), item.get('source_refs', [])])
+                             item.get('measured'), item.get('required'), item.get('source'), item.get('source_refs', []),
+                             *evidence_labels(item)])
     points = [['Route', 'Point', 'X mm', 'Y mm', 'Z mm']]
     segments = [['Route', 'Leg', 'Start X mm', 'Start Y mm', 'Start Z mm', 'End X mm', 'End Y mm', 'End Z mm', 'Centerline length mm', 'Outer diameter mm', 'Component status']]
     for key in ('original', 'candidate'):
@@ -210,10 +260,12 @@ def write_review_xlsx(layout, result, destination):
         piece_review = assembly.get('manufacturing_assessment') or {}
         if piece_review:
             summary.append(['Proposed-piece checks', piece_review['counts']])
-            checks = [['Check', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Proposed piece IDs', 'Evidence basis']]
+            checks = [['Check', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Proposed piece IDs', 'Evidence basis',
+                       'Evidence kind', 'Evidence completeness', 'Evidence note']]
             for item in piece_review['findings']:
                 checks.append([item['rule_id'], item['status'], item['severity'], item['message'], item.get('measured'),
-                               item.get('required'), item.get('component_ids', []), item.get('evidence_basis', '')])
+                               item.get('required'), item.get('component_ids', []), item.get('evidence_basis', ''),
+                               *evidence_labels(item)])
             sheets.append(('Proposed piece checks', checks))
             joints = [['Interface ID', 'Type', 'X mm', 'Y mm', 'Z mm', 'Status']]
             if accepted:

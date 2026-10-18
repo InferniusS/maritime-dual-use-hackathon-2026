@@ -711,7 +711,7 @@ def run_workflow(layout: dict) -> dict:
         result = add_pipe_proposal(result)
     if profile != "fmg-v3":
         return result
-    from .challenge_rules import assess_layout
+    from .challenge_rules import EVIDENCE_KINDS, STATUSES, assess_layout
     normalized = result["normalized_layout"]
     baseline = assess_layout(normalized, result["original"]["points"])
     candidate_geometry = result.get("candidate")
@@ -725,12 +725,27 @@ def run_workflow(layout: dict) -> dict:
             continue
         context = normalized.get("model_context", {})
         from .model_context import validate_allowed_spaces
-        checks = context.get("findings", []) + validate_allowed_spaces(normalized, record["points"])
-        for item in checks:
+        checks = [(item, item["rule_id"] == "allowed_space_size") for item in context.get("findings", [])]
+        checks.extend((item, True) for item in validate_allowed_spaces(normalized, record["points"]))
+        for item, geometric in checks:
+            if geometric:
+                evidence_kind = "computed_geometry"
+                completeness = "supplied_space_geometry_only" if context.get("allowed_spaces") else "not_provided"
+                evidence_note = ("Computed from this route and the supplied allowed-space boxes, including pipe radius and declared boundary clearance. "
+                                 "Space identities, required-space assignments and alignment are supplied declarations; this does not independently verify a hull mesh or complete ship coverage.")
+            else:
+                evidence_kind = "reviewer_declaration"
+                completeness = "incomplete_context_inventory" if context else "not_provided"
+                evidence_note = ("This finding records missing or limited designer-supplied context, source references, alignment or coverage declarations. "
+                                 "The program does not independently establish source completeness or inspect the referenced evidence.")
             assessment["findings"].append({"id": "context_" + item["rule_id"], "status": item["status"], "severity": "error",
                 "source": {"document": "Pipe Layout Optimization V3", "page": 2}, "message": item["message"],
-                "measured": item, "required": "Declared model context", "source_refs": []})
+                "measured": item, "required": "Declared model context", "source_refs": item.get("source_refs", []),
+                "evidence_kind": evidence_kind, "evidence_completeness": completeness, "evidence_note": evidence_note})
         assessment["counts"] = {status: sum(f["status"] == status for f in assessment["findings"]) for status in ("pass", "fail", "needs_review", "not_applicable")}
+        assessment["evidence_counts"] = {kind: sum(f["evidence_kind"] == kind for f in assessment["findings"]) for kind in EVIDENCE_KINDS}
+        assessment["evidence_status_counts"] = {kind: {status: sum(f["evidence_kind"] == kind and f["status"] == status
+            for f in assessment["findings"]) for status in STATUSES} for kind in EVIDENCE_KINDS}
         assessment["hard_failures"] = [f["id"] for f in assessment["findings"] if f["status"] == "fail" and f["severity"] == "error"]
         assessment["complete"] = False
     result["rule_profile"] = "fmg-v3"

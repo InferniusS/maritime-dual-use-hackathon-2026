@@ -131,7 +131,44 @@ def obstacles_from_import(cad, *, drawing_id, category, coordinate_frame_id,
             "warnings": list(cad.get("warnings", []))}
 
 
-def apply_model_context(layout, context, drawing_identity=None):
+def _normalize_screening_layout(layout):
+    """Validate a millimetre inventory in bounded groups without discarding shapes.
+
+    Only whole-drawing screening uses this path. It cannot carry connection
+    exemptions or be passed directly to the route-search engine.
+    """
+    from .workflow import normalize_layout
+
+    if layout.get("units") != "mm" or layout.get("protected_endpoints"):
+        raise ValueError("Dense screening requires millimetres and no fixed-contact exemptions")
+    obstacles = layout.get("obstacles")
+    if not isinstance(obstacles, list):
+        raise ValueError("Screening obstacles must be a list")
+    ids = set()
+    batches, current, capsule_count = [], [], 0
+    for index, obstacle in enumerate(obstacles):
+        shape = core._prepare_obstacle(obstacle, f"obstacles[{index}]", 0)
+        if shape.id in ids:
+            raise ValueError("Screening obstacle IDs must be unique across all batches")
+        ids.add(shape.id)
+        count = len(shape.capsules)
+        if current and (len(current) >= core.MAX_OBSTACLES or capsule_count + count > core.MAX_TOTAL_CAPSULES):
+            batches.append(current)
+            current, capsule_count = [], 0
+        current.append(obstacle)
+        capsule_count += count
+    batches.append(current)
+    result, normalized_obstacles = None, []
+    for batch in batches:
+        normalized = normalize_layout({**layout, "obstacles": batch})
+        if result is None:
+            result = normalized
+        normalized_obstacles.extend(normalized["obstacles"])
+    result["obstacles"] = normalized_obstacles
+    return result
+
+
+def apply_model_context(layout, context, drawing_identity=None, *, _screening_batches=False):
     """Apply explicit surroundings and allowed routing spaces to a copied layout.
 
     Context keys: units, coordinate_frame, ship_axes, coverage, allowed_spaces,
@@ -154,7 +191,8 @@ def apply_model_context(layout, context, drawing_identity=None):
     frame_id = _text(frame.get("id"), "coordinate_frame.id")
     if frame.get("shared_coordinates_confirmed") is not True:
         raise ValueError("Model context requires shared_coordinates_confirmed=true. No drawing alignment is inferred")
-    result = normalize_layout(layout)
+    normalize = _normalize_screening_layout if _screening_batches else normalize_layout
+    result = normalize(layout)
     previous = result.get("model_context", {})
     if previous and previous.get("coordinate_frame", {}).get("id") != frame_id:
         raise ValueError("Cannot replace an applied context with a different coordinate frame. Start from the original layout")
@@ -300,9 +338,9 @@ def apply_model_context(layout, context, drawing_identity=None):
             lookup[identifier] = obstacles[-1]
             sources.append(source)
             source_lookup[identifier] = source
-    if len(obstacles) > core.MAX_OBSTACLES:
+    if len(obstacles) > core.MAX_OBSTACLES and not _screening_batches:
         raise ValueError(f"Local model context contains {len(obstacles)} obstacles, exceeding {core.MAX_OBSTACLES}. Reduce the local region. No geometry was dropped")
-    if sum(len(item.get("capsules", [])) for item in obstacles) > core.MAX_TOTAL_CAPSULES:
+    if sum(len(item.get("capsules", [])) for item in obstacles) > core.MAX_TOTAL_CAPSULES and not _screening_batches:
         raise ValueError("Local model context exceeds the total capsule limit. No geometry was dropped")
     # Even positive declarations are user evidence, not automatic proof that
     # unknown geometry, hidden references, pipe semantics or ports were decoded.
@@ -335,7 +373,7 @@ def apply_model_context(layout, context, drawing_identity=None):
         cad["counts"]["model_context_obstacles"] = len(sources)
     # Reuse the established geometry and protected-stub validations after merge.
     # This deliberately rejects formerly exempt endpoint contacts that changed.
-    return normalize_layout(result)
+    return normalize(result)
 
 
 def _inset_spaces(layout):

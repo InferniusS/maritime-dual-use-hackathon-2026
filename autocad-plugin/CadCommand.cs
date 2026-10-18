@@ -19,7 +19,7 @@ public sealed partial class PreviewCommand
     private const string SuggestionLayer = "MARITIME_SUGGESTION";
     private const int SnapshotLimitBytes = 48 * 1024 * 1024;
 
-    private static readonly Dictionary<string, JsonObject> DrawingContexts = new();
+    private static readonly Dictionary<Database, JsonObject> DrawingContexts = new();
 
     [CommandMethod("MARITIMECONTEXT", CommandFlags.Modal)]
     public static void LoadDrawingContext()
@@ -27,12 +27,13 @@ public sealed partial class PreviewCommand
         var document = AcApplication.DocumentManager.MdiActiveDocument;
         if (document is null) return;
         var editor = document.Editor;
-        var fingerprint = document.Database.FingerprintGuid.ToString();
+        var database = document.Database;
+        EnsureDrawingSessionCleanup();
         try
         {
             var action = AskKeyword(editor, "Drawing context", ["Load", "Clear", "Status"], "Load");
-            if (action == "Clear") { DrawingContexts.Remove(fingerprint); editor.WriteMessage("\nDrawing context cleared."); return; }
-            if (action == "Status") { editor.WriteMessage(DrawingContexts.ContainsKey(fingerprint) ? "\nA context file is loaded for this drawing session." : "\nNo context file is loaded. Missing context will be reported for review."); return; }
+            if (action == "Clear") { DrawingContexts.Remove(database); InvalidateDrawingScan(document); editor.WriteMessage("\nDrawing context cleared."); return; }
+            if (action == "Status") { editor.WriteMessage(DrawingContexts.ContainsKey(database) ? "\nA context file is loaded for this drawing session." : "\nNo context file is loaded. Missing context will be reported for review."); return; }
             if (action != "Load") return;
             var selected = editor.GetFileNameForOpen(new PromptOpenFileOptions("\nChoose the reviewed model context JSON file") { Filter = "JSON files (*.json)|*.json" });
             if (selected.Status != PromptStatus.OK) return;
@@ -40,7 +41,8 @@ public sealed partial class PreviewCommand
                 throw new InvalidOperationException("Context files must be at most 16 MB. Use a smaller local scene.");
             var json = JsonNode.Parse(File.ReadAllText(selected.StringResult)) as JsonObject
                 ?? throw new InvalidOperationException("The context file must be a JSON object.");
-            DrawingContexts[fingerprint] = json;
+            DrawingContexts[database] = json;
+            InvalidateDrawingScan(document);
             editor.WriteMessage("\nContext loaded for this drawing session. Geometry and evidence will be validated by MARITIMEREVIEW or MARITIMECAD. Confirm drawing alignment before running.");
         }
         catch (System.Exception exception) { editor.WriteMessage($"\nContext was not loaded: {exception.Message}"); }
@@ -53,7 +55,10 @@ public sealed partial class PreviewCommand
     public static void ReviewDrawingPipes() => ReviewDrawing(true);
 
     [CommandMethod("MARITIMEOPTIMIZE", CommandFlags.Modal)]
-    public static void OptimizeDrawingSections() => ReviewDrawing(true, true);
+    public static void OptimizeDrawingSections()
+    {
+        if (!TryOptimizeLatestScan()) ReviewDrawing(true, true);
+    }
 
     private static void ReviewDrawing(bool wholeDrawing, bool coordinated = false)
     {
@@ -135,7 +140,7 @@ public sealed partial class PreviewCommand
                 inspectionRequest["reverse_flow"] = reverse;
                 inspectionRequest["min_slope"] = slope;
                 inspectionRequest["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified";
-                AddDrawingContext(inspectionRequest, metadata.fingerprint);
+                AddDrawingContext(inspectionRequest, document.Database);
             }
             else inspectionRequest["selected_handles"] = new JsonArray(JsonValue.Create(handle));
             var inspected = PostJson(client, wholeDrawing ? "/api/autocad/review" : "/api/autocad/inspect", inspectionRequest);
@@ -182,7 +187,7 @@ public sealed partial class PreviewCommand
                 ["clearance"] = clearance, ["padding"] = padding, ["reverse_flow"] = reverse,
                 ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
             };
-            AddDrawingContext(request, metadata.fingerprint);
+            AddDrawingContext(request, document.Database);
             var prepared = PostJson(client, "/api/prepare-cad-layout", request);
             var layout = RequiredLayout(prepared);
             VerifySnapshotContext(layout, metadata.fingerprint, snapshotHash);
@@ -249,9 +254,9 @@ public sealed partial class PreviewCommand
         }
     }
 
-    private static void AddDrawingContext(JsonObject request, string fingerprint)
+    private static void AddDrawingContext(JsonObject request, Database database)
     {
-        if (!DrawingContexts.TryGetValue(fingerprint, out var contextFile)) return;
+        if (!DrawingContexts.TryGetValue(database, out var contextFile)) return;
         request["model_context"] = (contextFile["model_context"] ?? contextFile).DeepClone();
         if (contextFile["engineering"] is JsonObject engineering) request["engineering"] = engineering.DeepClone();
     }

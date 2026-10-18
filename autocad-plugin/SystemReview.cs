@@ -18,10 +18,10 @@ namespace Maritime.AutoCAD;
 public sealed partial class PreviewCommand
 {
     private const int MaximumCoordinatedSections = 12;
-    private static readonly Dictionary<string, string> LatestReports = new();
-    private static readonly Dictionary<string, (string Url, string CadId, string Hash)> PendingReports = new();
+    private static readonly Dictionary<Database, string> LatestReports = new();
+    private static readonly Dictionary<Database, (string Url, string CadId, string Hash)> PendingReports = new();
     private sealed record SectionReview(string CandidateId, JsonObject Metadata,
-        List<MeshPart> Proposal, List<MeshPart> Reference, List<Point3d> Centerline);
+        List<MeshPart> Proposal, List<MeshPart> Reference, List<Point3d> Centerline, List<ReviewDimension> Dimensions);
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
@@ -34,7 +34,7 @@ public sealed partial class PreviewCommand
         var fingerprint = document.Database.FingerprintGuid.ToString();
         try
         {
-            if (PendingReports.TryGetValue(fingerprint, out var pending))
+            if (PendingReports.TryGetValue(document.Database, out var pending))
             {
                 using var client = CreateClient();
                 client.Timeout = TimeSpan.FromSeconds(15);
@@ -42,16 +42,17 @@ public sealed partial class PreviewCommand
                 var state = Text(result, "status");
                 if (state is "pending" or "running")
                 {
-                    document.Editor.WriteMessage("\nThe latest coordinated search is still running. Try MARITIMEREPORT after the local service finishes.");
+                    document.Editor.WriteMessage("\nThe latest review is still running. Try MARITIMEREPORT after the local service finishes.");
                     return;
                 }
-                if (state != "complete") throw new InvalidOperationException(result["error"]?.GetValue<string>() ?? "The latest coordinated search failed.");
-                VerifyBatchContext(document, result, pending.CadId, pending.Hash, fingerprint);
+                if (state != "complete") throw new InvalidOperationException(result["error"]?.GetValue<string>() ?? "The latest review failed.");
+                VerifyBatchContext(document, result, pending.CadId, pending.Hash, fingerprint, requireCurrentScan: false);
+                if (pending.Url.StartsWith("/api/drawing-jobs/", StringComparison.Ordinal)) CaptureScanResult(document, result);
                 RememberReport(document, result);
-                PendingReports.Remove(fingerprint);
+                PendingReports.Remove(document.Database);
             }
-            if (!LatestReports.TryGetValue(fingerprint, out var path))
-                throw new InvalidOperationException("No report has been created for this drawing in this AutoCAD session. Run MARITIMEREVIEW, MARITIMEOPTIMIZE or MARITIMECAD first.");
+            if (!LatestReports.TryGetValue(document.Database, out var path))
+                throw new InvalidOperationException("No report has been created for this drawing in this AutoCAD session. Run MARITIMESCAN, MARITIMEREVIEW, MARITIMEOPTIMIZE or MARITIMECAD first.");
             ValidateReportPath(path);
             Process.Start(new ProcessStartInfo(ServiceUrl + path) { UseShellExecute = true });
             document.Editor.WriteMessage($"\nOpened the latest report for this drawing: {ServiceUrl}{path}\nKeep the Python service running while viewing it.");
@@ -63,9 +64,9 @@ public sealed partial class PreviewCommand
     {
         if (response["exports"]?["report"] is not JsonValue value || !value.TryGetValue<string>(out var path)) return;
         ValidateReportPath(path);
-        var fingerprint = document.Database.FingerprintGuid.ToString();
-        LatestReports[fingerprint] = path;
-        PendingReports.Remove(fingerprint);
+        EnsureDrawingSessionCleanup();
+        LatestReports[document.Database] = path;
+        PendingReports.Remove(document.Database);
     }
 
     private static void ValidateReportPath(string path)
@@ -99,6 +100,7 @@ public sealed partial class PreviewCommand
         string profile, double clearance, double padding, double grid, bool reverse, double slope)
     {
         var editor = document.Editor;
+        RequireCurrentScanSnapshot(document, cadId, snapshotHash);
         List<int> selected;
         while (true)
         {
@@ -112,7 +114,8 @@ public sealed partial class PreviewCommand
         var selectedCandidates = new Dictionary<string, JsonNode>();
         foreach (var number in selected)
         {
-            var candidate = candidates[number - 1] ?? throw new InvalidOperationException("An empty candidate was selected.");
+            var candidate = candidates[number - 1]?.DeepClone() as JsonObject ?? throw new InvalidOperationException("An empty candidate was selected.");
+            candidate["selection_number"] = number;
             var candidateId = Text(candidate, "id");
             editor.WriteMessage($"\nSection {number}: {Text(candidate, "label")}; source handles {SourceHandleText(candidate)}.");
             var section = new JsonObject
@@ -122,7 +125,7 @@ public sealed partial class PreviewCommand
                 ["reverse_flow"] = reverse, ["min_slope"] = slope,
                 ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
             };
-            AddDrawingContext(section, fingerprint);
+            AddDrawingContext(section, document.Database);
             var prepareRequest = (JsonObject)section.DeepClone();
             prepareRequest["cad_id"] = cadId;
             JsonObject layout;
@@ -170,12 +173,13 @@ public sealed partial class PreviewCommand
             ["document"] = new JsonObject { ["name"] = Path.GetFileName(document.Name), ["fingerprint"] = fingerprint },
             ["sections"] = sections
         };
+        RequireCurrentScanSnapshot(document, cadId, snapshotHash);
         var pending = PostJson(client, "/api/autocad/optimize", request);
         var reply = WaitForSystemJob(document, pending, cadId, snapshotHash);
         if (reply is null) return;
         VerifyBatchContext(document, reply, cadId, snapshotHash, fingerprint);
         RememberReport(document, reply);
-        PendingReports.Remove(fingerprint);
+        PendingReports.Remove(document.Database);
         var summary = reply["summary"] as JsonObject ?? throw new InvalidOperationException("No coordinated result summary was returned.");
         if (summary["complete_system_verified"]?.GetValue<bool>() != false)
             throw new InvalidOperationException("The service did not identify the scope limits of this review.");
@@ -247,7 +251,8 @@ public sealed partial class PreviewCommand
         var statusUrl = Text(pending, "status_url");
         if (!Regex.IsMatch(jobId, "^[a-fA-F0-9]{32}$") || statusUrl != $"/api/system-jobs/{jobId}")
             throw new InvalidOperationException("The local service returned an invalid search status address.");
-        PendingReports[document.Database.FingerprintGuid.ToString()] = (statusUrl, cadId, snapshotHash);
+        EnsureDrawingSessionCleanup();
+        PendingReports[document.Database] = (statusUrl, cadId, snapshotHash);
         using var client = CreateClient();
         client.Timeout = TimeSpan.FromSeconds(15);
         var editor = document.Editor;
@@ -281,12 +286,13 @@ public sealed partial class PreviewCommand
         throw new InvalidOperationException("The coordinated search did not finish within ten minutes. No geometry was saved. Check the local service before restarting.");
     }
 
-    private static void VerifyBatchContext(Document document, JsonObject reply, string cadId, string hash, string fingerprint)
+    private static void VerifyBatchContext(Document document, JsonObject reply, string cadId, string hash, string fingerprint, bool requireCurrentScan = true)
     {
         if (Text(reply, "cad_id") != cadId || Text(reply, "source_sha256") != hash ||
             reply["document"]?["fingerprint"]?.GetValue<string>() != fingerprint ||
             document.Database.FingerprintGuid.ToString() != fingerprint || AcApplication.DocumentManager.MdiActiveDocument != document)
             throw new InvalidOperationException("This coordinated result does not match the active drawing snapshot.");
+        if (requireCurrentScan) RequireCurrentScanSnapshot(document, cadId, hash);
     }
 
     private static List<SectionReview> ValidateSectionReviews(JsonObject summary, Dictionary<string, JsonObject> expected,
@@ -349,6 +355,8 @@ public sealed partial class PreviewCommand
             var metadata = new JsonObject
             {
                 ["candidate_id"] = id, ["source_handles"] = selected[id]["source_handles"]?.DeepClone(),
+                ["global_route_number"] = selected[id]["global_number"]?.DeepClone(),
+                ["selection_number"] = selected[id]["selection_number"]?.DeepClone(),
                 ["cad_id"] = response["cad_id"]?.DeepClone(),
                 ["drawing_fingerprint"] = fingerprint, ["source_snapshot_sha256"] = snapshotHash,
                 ["status"] = status, ["result_url"] = response["exports"]?["json"]?.DeepClone(),
@@ -358,7 +366,7 @@ public sealed partial class PreviewCommand
                 ["manufacturing_counts"] = assembly["manufacturing_assessment"]?["counts"]?.DeepClone(),
                 ["complete_system_verified"] = false, ["synthetic_demo"] = false
             };
-            reviews.Add(new SectionReview(id, metadata, proposal, reference, centerline));
+            reviews.Add(new SectionReview(id, metadata, proposal, reference, centerline, ReadAssemblyDimensions(assembly)));
         }
         return reviews;
     }
@@ -440,9 +448,11 @@ public sealed partial class PreviewCommand
             model.AppendEntity(line); transaction.AddNewlyCreatedDBObject(line, true);
             var metadata = (JsonObject)section.Metadata.DeepClone(); metadata["role"] = "proposal_centerline";
             WriteReviewMetadata(line, transaction, metadata);
+            SaveReviewDimensions(document, transaction, model, section.Dimensions, drawingScale, section.Metadata);
         }
         transaction.Commit();
         document.Editor.WriteMessage($"\nSaved one combined comparison for {sections.Count} accepted sections, with separate source identity and centerlines. Source pipe objects were not replaced. One UNDO removes this comparison. Use MARITIMEVIEW to switch views and MARITIMEREPORT for outcomes. Save this drawing under a new name to keep the review.");
+        document.Editor.WriteMessage("\nMeasured piece callouts were saved on MARITIME_REVIEW_DIMENSIONS. Use MARITIMEDIMENSIONS On/Off to show or hide them. They describe review geometry, not fabrication approval.");
         void Add(IEnumerable<MeshPart> parts, ObjectId layer, short color, string role, JsonObject metadata)
         {
             foreach (var part in parts)

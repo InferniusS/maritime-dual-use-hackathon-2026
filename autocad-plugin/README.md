@@ -4,7 +4,7 @@ This plugin brings the existing Python pipe router into AutoCAD. AutoCAD handles
 
 The website does not need to be open. Both the plugin and browser app use the same calculation code.
 
-**Update with the [Snapdragon guide](../docs/3d-demo-snapdragon.md), then follow the [pitch workflow](../docs/pitch-demo.md).** The team has displayed and saved the 3D comparison at the venue. This build adds `MARITIMEREVIEW`, proposed-piece findings and automatic framing; those changes need a new live rehearsal. The [original setup guide](../docs/snapdragon-guide.md) remains available for fresh installations.
+**Update and test with the [whole-drawing guide](../docs/whole-drawing-snapdragon-test.md).** The team has displayed and saved a single-section 3D comparison at the venue. This build adds full inferred-section scanning, finding navigation and visible review dimensions. These additions need a new native rehearsal. The [original setup guide](../docs/snapdragon-guide.md) remains available for fresh installations.
 
 ## Requirements
 
@@ -56,7 +56,7 @@ Keep this window running. The plugin connects to `http://127.0.0.1:8767` on the 
 
 These commands do not require `Activate.ps1` or a PowerShell execution policy change. You can leave the blocked setup script alone.
 
-Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Its capabilities must include `drawing_review`, `rounded_pipe_proposal`, `challenge_rules_v3`, `model_context` and `review_excel`. If they are missing, update the Python files and restart the service before loading the current DLL.
+Check the service at [http://127.0.0.1:8767/api/health](http://127.0.0.1:8767/api/health). It should identify itself as `maritime-pipe-router` with API version 1. Its capabilities must include `drawing_scan`, `coordinated_sections`, `rounded_pipe_proposal`, `challenge_rules_v3`, `model_context` and `review_excel`. If they are missing, update the Python files and restart the service before loading the current DLL.
 
 ## Use the included DLL
 
@@ -109,7 +109,10 @@ If AutoCAD blocks the DLL use a trusted project folder or add that specific fold
 | `MARITIMEDEMO` | Run a labeled synthetic layout in a new empty drawing with full-width before/after geometry |
 | `MARITIMEVIEW` | Show saved Original, Proposal or Both review layers |
 | `MARITIMECONTEXT` | Load, inspect the loaded status or clear reviewed context for the active drawing session |
-| `MARITIMEOPTIMIZE` | Coordinate up to twelve selected CAD-solid sections, compare and save accepted changes together |
+| `MARITIMESCAN` | Screen every supported inferred section, with progress, cancellation and explicit coverage |
+| `MARITIMEFIND` | Find a full-scan global section number, highlight actual source geometry and flagged segments |
+| `MARITIMEOPTIMIZE` | Coordinate up to twelve selected CAD-solid sections, using the current full scan when available |
+| `MARITIMEDIMENSIONS` | Show or hide measured proposal-piece review callouts |
 | `MARITIMEREPORT` | Open the latest local report for the current drawing, including a finished background job |
 | `MARITIMELINEOPTIMIZE` | Test a route made from selected straight lines or polylines with selected obstacle objects |
 | `MARITIMEPREVIEW` | Check that selected line geometry can be shown as a temporary cyan overlay |

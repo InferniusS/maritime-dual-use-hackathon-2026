@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from copy import deepcopy
 import html
+import json
 import math
 import time
 
@@ -17,7 +18,7 @@ from .cad_import import inspect_cad
 from .cad_layout import _solid_boxes, prepare_cad_layout
 from .cad_network import inspect_network
 from .challenge_rules import assess_layout
-from .workflow import validate_layout_route
+from .workflow import _validate_normalized, normalize_layout, validate_layout_route
 
 MAX_REVIEW_ROUTES = 50
 MAX_REVIEW_SECONDS = 30.0
@@ -28,6 +29,7 @@ STATUS_LABELS = {
     "no_obvious_detour": "No obvious detour",
     "needs_review": "Designer review needed",
     "not_reviewed": "Not screened",
+    "not_processed": "Not processed",
 }
 
 
@@ -39,11 +41,7 @@ def _measures(candidate):
     return length, backtrack
 
 
-def review_drawing(cad, *, system_type="pressurized", clearance=50.8, padding=500,
-                   rule_profile="fmg-v3", model_context=None, engineering=None,
-                   reverse_flow=False, min_slope=0.01):
-    """Return screening rows and explicit coverage; do not mutate imported CAD."""
-    started = time.perf_counter()
+def _screen_settings(*, system_type, clearance, padding, rule_profile, reverse_flow, min_slope):
     if system_type not in ("pressurized", "gravity"):
         raise ValueError("system_type must be pressurized or gravity")
     if rule_profile not in ("fmg-v3", "prototype-unverified"):
@@ -57,71 +55,170 @@ def review_drawing(cad, *, system_type="pressurized", clearance=50.8, padding=50
         raise ValueError("Clearance and padding must be nonnegative")
     if rule_profile == "fmg-v3" and clearance < 50.8 - core.EPSILON:
         raise ValueError("The V3 challenge profile requires at least 50.8 mm shock clearance")
+    return {"system_type": system_type, "clearance": clearance, "padding": padding,
+            "rule_profile": rule_profile, "reverse_flow": reverse_flow, "min_slope": min_slope}
+
+
+def _review_inventory(cad):
     network = inspect_network(cad)
     members = {identity for chain in network["chains"] for identity in chain["member_ids"]}
     omitted = {record.get("candidate_id") for record in network["invalid_candidates"] + network["duplicate_candidates"]}
     candidates = [("chain", item) for item in network["chains"]]
-    candidates += [("run", item) for item in cad["route_candidates"] if item["id"] not in members | omitted]
+    candidates += [("run", item) for item in cad["route_candidates"] if isinstance(item, dict) and item.get("id") not in members | omitted]
     # Long connected runs are useful review units. Very short cylinders may be
     # fittings or fasteners; their semantic identity is never guessed here.
     candidates.sort(key=lambda pair: (
         _measures(pair[1])[0] < 2 * pair[1]["geometric_diameter"],
         -pair[1].get("member_count", 1), -_measures(pair[1])[1], -_measures(pair[1])[0], pair[1]["id"]))
+    return network, candidates
+
+
+def _screening_row(kind, candidate):
+    length, backtrack = _measures(candidate)
+    return {
+        "id": candidate["id"], "label": candidate.get("name", candidate["id"]),
+        "kind": kind, "member_count": candidate.get("member_count", 1),
+        "source_handles": sorted({item["source_handle"] for item in _candidate_sources(candidate)}),
+        "diameter_mm": candidate["geometric_diameter"], "length_mm": length,
+        "axis_backtracking_mm": backtrack, "start": candidate["points"][0], "end": candidate["points"][-1],
+        "review_status": "not_reviewed", "review_message": "Screening time budget reached; select to inspect this route individually.",
+        "issue_count": 0, "endpoint_contact_count": 0, "geometry_checked": False,
+        "findings": [], "full_compliance_verified": False,
+    }
+
+
+def _screen_layout_batches(layout, *, rule_profile):
+    """Check all local obstacles in bounded groups; never change routing limits."""
+    batches, current, capsules = [], [], 0
+    for obstacle in layout["obstacles"]:
+        count = len(obstacle.get("capsules", []))
+        if current and (len(current) >= core.MAX_OBSTACLES or capsules + count > core.MAX_TOTAL_CAPSULES):
+            batches.append(current)
+            current, capsules = [], 0
+        current.append(obstacle)
+        capsules += count
+    batches.append(current)
+    combined, assessment, seen = None, None, set()
+    shock_hits, shock_refs = [], []
+    obstacle_count = 0
+    for obstacles in batches:
+        chunk = {**layout, "obstacles": obstacles}
+        # Context was applied once while preparing this whole section. Reapplying
+        # it here would append all context obstacles again and defeat batching.
+        normalized = normalize_layout(chunk)
+        checked = _validate_normalized(normalized, normalized["pipe"]["original_route"],
+                                       allow_pressure_polyline=True)
+        if combined is None:
+            combined = {**checked, "issues": []}
+        for issue in checked["issues"]:
+            fingerprint = json.dumps(issue, sort_keys=True)
+            if fingerprint not in seen:
+                seen.add(fingerprint)
+                combined["issues"].append(issue)
+        if rule_profile == "fmg-v3":
+            chunk_assessment = assess_layout(chunk)
+            if assessment is None:
+                assessment = chunk_assessment
+            shock = next(item for item in chunk_assessment["findings"] if item["id"] == "shock_clearance")
+            shock_hits.extend(shock["measured"]["collisions"])
+            shock_refs.extend(shock.get("source_refs", []))
+            obstacle_count += shock["measured"]["obstacle_count"]
+    combined["valid"] = not combined["issues"]
+    if assessment:
+        shock = next(item for item in assessment["findings"] if item["id"] == "shock_clearance")
+        shock["status"] = "fail" if shock_hits else "pass" if obstacle_count else "needs_review"
+        shock["measured"].update(obstacle_count=obstacle_count, collisions=shock_hits)
+        shock["source_refs"] = list(dict.fromkeys(shock_refs))
+        assessment["counts"] = {status: sum(item["status"] == status for item in assessment["findings"])
+            for status in ("pass", "fail", "needs_review", "not_applicable")}
+        assessment["hard_failures"] = [item["id"] for item in assessment["findings"] if item["status"] == "fail" and item["severity"] == "error"]
+        assessment["complete"] = not assessment["counts"]["needs_review"] and not assessment["counts"]["fail"]
+        if "evidence_status_counts" in assessment:
+            assessment["evidence_status_counts"] = {kind: {status: sum(item.get("evidence_kind") == kind and item["status"] == status
+                for item in assessment["findings"]) for status in ("pass", "fail", "needs_review", "not_applicable")}
+                for kind in assessment["evidence_status_counts"]}
+    return combined, assessment, len(batches)
+
+
+def _screen_candidate(cad, candidate, row, prepared, *, system_type, clearance, padding,
+                      rule_profile, model_context, engineering, reverse_flow, min_slope):
+    length, backtrack = row["length_mm"], row["axis_backtracking_mm"]
+    try:
+        layout = prepare_cad_layout(cad, candidate["id"], system_type=system_type, clearance=clearance,
+            padding=padding, rule_profile=rule_profile, model_context=model_context, engineering=engineering,
+            reverse_flow=reverse_flow, _prepared_geometry=prepared)
+        row["start"], row["end"] = layout["pipe"]["start"], layout["pipe"]["end"]
+        if system_type == "gravity":
+            layout["rules"]["min_slope"] = min_slope
+        row["endpoint_contact_count"] = len(layout["cad_context"]["endpoint_contacts"])
+        row["obstacle_count"] = len(layout["obstacles"])
+        row["fallback_box_count"] = layout["cad_context"]["counts"]["fallback_box_obstacles"]
+        batching = prepared.get("screening_batches") is True
+        shape_count = sum(max(1, len(obstacle.get("capsules", []))) for obstacle in layout["obstacles"]) if batching else len(layout["obstacles"])
+        if (len(candidate["points"]) - 1) * shape_count > MAX_REVIEW_SEGMENT_OBSTACLE_PAIRS:
+            row["review_message"] = "This route exceeds the drawing screening work limit. Select it for an individual check."
+            return row
+        if batching:
+            checked, assessment, batch_count = _screen_layout_batches(layout, rule_profile=rule_profile)
+            row["obstacle_batches_checked"] = batch_count
+        else:
+            checked = validate_layout_route(layout, layout["pipe"]["original_route"])
+            assessment = assess_layout(layout) if rule_profile == "fmg-v3" else None
+        row["geometry_checked"] = True
+        row["findings"] = []
+        route_points = layout["pipe"]["original_route"]
+        obstacle_sources = {item["id"]: item for item in layout["cad_context"]["obstacle_sources"]}
+        for issue in checked["issues"]:
+            finding = {**issue, "evidence_kind": "computed_geometry", "evidence_completeness": "extracted_envelopes",
+                "evidence_note": "Computed from the selected inferred centerline and supplied geometry. Complete source coverage and physical component identity remain unverified."}
+            segment = finding.get("segment")
+            if isinstance(segment, int) and not isinstance(segment, bool) and 0 <= segment < len(route_points) - 1:
+                finding.update(segment_start=list(route_points[segment]), segment_end=list(route_points[segment + 1]))
+            source = obstacle_sources.get(finding.get("obstacle"))
+            if source:
+                finding["obstacle_source"] = {key: deepcopy(source[key]) for key in ("source_handle", "instance_path") if key in source}
+            row["findings"].append(finding)
+        row["issue_count"] = len(checked["issues"])
+        if assessment:
+            row["rule_counts"] = assessment["counts"]
+            row["rule_findings"] = assessment["findings"]
+        failures = [item for item in (assessment or {}).get("findings", []) if item["status"] == "fail"]
+        if checked["issues"] or failures:
+            row["review_status"] = "attention"
+            row["review_message"] = (f"{len(checked['issues'])} geometry flags; {len(failures)} failed rule screens. "
+                f"{row['endpoint_contact_count']} endpoint contacts need connection review. Conservative geometry may flag intended contacts.")
+        elif length < 2 * row["diameter_mm"]:
+            row["review_status"] = "needs_review"
+            row["review_message"] = "Short cylindrical component: confirm this is a reroutable pipe, not a required fitting or fastener."
+        elif backtrack > 1.0:
+            row["review_status"] = "opportunity"
+            row["review_message"] = "Coordinate backtracking suggests a possible detour. Search must prove a feasible improvement within the approved spaces."
+        else:
+            row["review_status"] = "no_obvious_detour"
+            row["review_message"] = "No coordinate backtracking or screened geometry issue. This does not establish an optimal route or full compliance."
+    except (ValueError, KeyError) as error:
+        row["review_status"] = "needs_review"
+        row["review_message"] = str(error)
+    return row
+
+
+def review_drawing(cad, *, system_type="pressurized", clearance=50.8, padding=500,
+                   rule_profile="fmg-v3", model_context=None, engineering=None,
+                   reverse_flow=False, min_slope=0.01):
+    """Return screening rows and explicit coverage; do not mutate imported CAD."""
+    started = time.perf_counter()
+    settings = _screen_settings(system_type=system_type, clearance=clearance, padding=padding,
+        rule_profile=rule_profile, reverse_flow=reverse_flow, min_slope=min_slope)
+    network, candidates = _review_inventory(cad)
     prepared = {"network": network, "solids": _solid_boxes(cad)}
     rows = []
     for kind, candidate in candidates[:MAX_REVIEW_ROUTES]:
-        length, backtrack = _measures(candidate)
-        row = {
-            "id": candidate["id"], "label": candidate.get("name", candidate["id"]),
-            "kind": kind, "member_count": candidate.get("member_count", 1),
-            "source_handles": sorted({item["source_handle"] for item in _candidate_sources(candidate)}),
-            "diameter_mm": candidate["geometric_diameter"], "length_mm": length,
-            "axis_backtracking_mm": backtrack, "start": candidate["points"][0], "end": candidate["points"][-1],
-            "review_status": "not_reviewed", "review_message": "Screening time budget reached; select to inspect this route individually.",
-            "issue_count": 0, "endpoint_contact_count": 0, "geometry_checked": False,
-            "findings": [], "full_compliance_verified": False,
-        }
+        row = _screening_row(kind, candidate)
         rows.append(row)
         if time.perf_counter() - started > MAX_REVIEW_SECONDS:
             continue
-        try:
-            layout = prepare_cad_layout(cad, candidate["id"], system_type=system_type, clearance=clearance,
-                padding=padding, rule_profile=rule_profile, model_context=model_context, engineering=engineering,
-                reverse_flow=reverse_flow, _prepared_geometry=prepared)
-            row["start"], row["end"] = layout["pipe"]["start"], layout["pipe"]["end"]
-            if system_type == "gravity":
-                layout["rules"]["min_slope"] = min_slope
-            row["endpoint_contact_count"] = len(layout["cad_context"]["endpoint_contacts"])
-            row["obstacle_count"] = len(layout["obstacles"])
-            row["fallback_box_count"] = layout["cad_context"]["counts"]["fallback_box_obstacles"]
-            if (len(candidate["points"]) - 1) * len(layout["obstacles"]) > MAX_REVIEW_SEGMENT_OBSTACLE_PAIRS:
-                row["review_message"] = "This route exceeds the drawing screening work limit. Select it for an individual check."
-                continue
-            checked = validate_layout_route(layout, layout["pipe"]["original_route"])
-            row["geometry_checked"] = True
-            row["findings"] = checked["issues"]
-            row["issue_count"] = len(checked["issues"])
-            assessment = assess_layout(layout) if rule_profile == "fmg-v3" else None
-            if assessment:
-                row["rule_counts"] = assessment["counts"]
-                row["rule_findings"] = assessment["findings"]
-            failures = [item for item in (assessment or {}).get("findings", []) if item["status"] == "fail"]
-            if checked["issues"] or failures:
-                row["review_status"] = "attention"
-                row["review_message"] = (f"{len(checked['issues'])} geometry flags; {len(failures)} failed rule screens. "
-                    f"{row['endpoint_contact_count']} endpoint contacts need connection review. Conservative geometry may flag intended contacts.")
-            elif length < 2 * row["diameter_mm"]:
-                row["review_status"] = "needs_review"
-                row["review_message"] = "Short cylindrical component: confirm this is a reroutable pipe, not a required fitting or fastener."
-            elif backtrack > 1.0:
-                row["review_status"] = "opportunity"
-                row["review_message"] = "Coordinate backtracking suggests a possible detour. Search must prove a feasible improvement within the approved spaces."
-            else:
-                row["review_status"] = "no_obvious_detour"
-                row["review_message"] = "No coordinate backtracking or screened geometry issue. This does not establish an optimal route or full compliance."
-        except (ValueError, KeyError) as error:
-            row["review_status"] = "needs_review"
-            row["review_message"] = str(error)
+        _screen_candidate(cad, candidate, row, prepared, model_context=model_context,
+                          engineering=engineering, **settings)
     priority = {"attention": 0, "opportunity": 1, "no_obvious_detour": 2, "needs_review": 3, "not_reviewed": 4}
     rows.sort(key=lambda row: (priority[row["review_status"]], -row["member_count"], -row["axis_backtracking_mm"], -row["length_mm"], row["id"]))
     reviewed = sum(row["geometry_checked"] for row in rows)

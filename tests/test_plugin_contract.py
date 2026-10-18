@@ -28,7 +28,7 @@ def test_autocad_public_command_names_are_unambiguous():
             owners[name.upper()].append(source.name)
     duplicates = {name: files for name, files in owners.items() if len(files) > 1}
     assert not duplicates, f'AutoCAD cannot unambiguously dispatch duplicate commands: {duplicates}'
-    assert {'MARITIMEOPTIMIZE', 'MARITIMELINEOPTIMIZE', 'MARITIMEREPORT'} <= owners.keys()
+    assert {'MARITIMESCAN', 'MARITIMEFIND', 'MARITIMEDIMENSIONS', 'MARITIMEOPTIMIZE', 'MARITIMELINEOPTIMIZE', 'MARITIMEREPORT'} <= owners.keys()
 
 
 @pytest.mark.parametrize('source_units,scale', [('mm', 1), ('in', 25.4), ('m', 1000)])

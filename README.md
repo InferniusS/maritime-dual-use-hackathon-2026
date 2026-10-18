@@ -2,7 +2,7 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status:** the team has displayed and saved a rounded proposal in the supplied cooling drawing on the Snapdragon. The newest build adds `MARITIMEOPTIMIZE` for coordinated review of up to twelve selected sections, and `MARITIMEREPORT` to reopen results. Follow the [new Snapdragon test guide](docs/coordinated-snapdragon-test.md). The coordinated command needs its own Windows rehearsal. This is a bounded review plugin, not a complete network or fabrication system.
+**Current status:** the team has displayed and saved a rounded proposal in the supplied cooling drawing on the Snapdragon. The newest build adds `MARITIMESCAN` to screen the full inferred drawing inventory and `MARITIMEFIND` to locate its findings. The supplied cooling file has 1,416 inferred sections; all were geometrically screened on the Mac with none omitted. Follow the [whole-drawing Snapdragon guide](docs/whole-drawing-snapdragon-test.md). The new commands need a Windows rehearsal. Complete engineering and fabrication requirements remain tracked in the [acceptance matrix](docs/requirement-acceptance-matrix.md).
 
 ## Start with AutoCAD
 
@@ -13,7 +13,7 @@ The [plugin guide](autocad-plugin/README.md) explains the commands and optional 
 1. Download or clone this repo on the AutoCAD laptop.
 2. Install the Python environment and start the local service.
 3. Load `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` through `NETLOAD` in AutoCAD 2027 for Windows. Rebuilding from source is also supported.
-4. For a supplied drawing, run `MARITIMEREVIEW`, read its coverage and choose a listed section. `MARITIMECAD` remains available to select one known pipe. For the labeled synthetic fallback, use an empty drawing and `MARITIMEDEMO` with `examples/assembly/01-congested-room.json`.
+4. For a supplied drawing, run `MARITIMESCAN`, open its report, use `MARITIMEFIND` to locate a numbered section, and `MARITIMEOPTIMIZE` to coordinate selected repairs. `MARITIMEREVIEW` remains a quick bounded review; `MARITIMECAD` selects one known pipe. For the labeled synthetic fallback, use an empty drawing and `MARITIMEDEMO` with `examples/assembly/01-congested-room.json`.
 
 The Python service runs on the same laptop. You do not need to open the website or upload the drawing through a browser. AutoCAD sends a temporary DXF snapshot to the local service.
 
@@ -25,7 +25,9 @@ Coordinated runs keep every requested outcome visible. Accepted proposals reserv
 
 Fresh CAD acceptance now exercises uploaded DXF geometry through extraction and search, including repair, unchanged and refusal cases, translated block placement and a joined nine-component detour. [Native AutoCAD scripts](examples/cad-acceptance/README.md) are included for the venue runtime test. Synthetic fixtures are labeled and do not guarantee unseen judge files.
 
-The new drawing review screens up to 50 inferred sections, flags geometry and rule concerns, identifies potential detours and reports exactly what remains unreviewed. It reuses the drawing geometry during screening, then sends the chosen section through the existing connection review, rounded search and Save flow. It does not call an unsearched section optimal or treat endpoint contacts as automatically permissible.
+The full scan accounts for every supported inferred section, including dense regions checked in bounded obstacle batches. Stable numbers, source handles, progress, cancellation and searchable HTML/Excel findings make all outcomes inspectable. Unsupported geometry, ambiguous connections and missing rule evidence remain explicit. The older quick review still lists at most 50 sections; coordinated optimization still accepts at most twelve selections per run. Screening all sections does not automatically redesign or certify the system.
+
+Rule findings distinguish computed geometry, supplied measurements, reviewer declarations and unimplemented checks. This distinction is separate from pass/fail: a declaration cannot silently become proof that the software measured the complete model.
 
 Proposed-piece checks now measure lengths, interface spacing, bend counts, angles and planarity from the generated geometry. Verified nominal-size evidence enables radius and straight-between-bends checks. Missing commercial fittings, joint design and installation evidence remain review items. AutoCAD now frames the selected 3D proposal and saved comparison automatically.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from copy import deepcopy
 from datetime import datetime, timezone
 from functools import partial
@@ -33,6 +34,8 @@ class Workspace:
         self.cad_sample = next(iter(self.cad_samples.values()), None)
         self.plotly = get_plotlyjs().encode("utf-8")
         self.system_jobs = {}
+        self.drawing_jobs = {}
+        self.drawing_cancellations = {}
         self.jobs_lock = threading.Lock()
         manifest = json.loads((ROOT / "examples/scenarios.json").read_text())
         self.scenarios = {record["id"]: {**record, "path": ROOT / "examples" / record["layout"]} for record in manifest["scenarios"]}
@@ -103,6 +106,15 @@ class Handler(BaseHTTPRequestHandler):
                     job = deepcopy(self.workspace.system_jobs.get(identifier))
                 if job is None:
                     return self.fail(404, "Optimization job not found. It may belong to a previous service session.")
+                self.send_json(200, job)
+            elif path.startswith("/api/drawing-jobs/"):
+                identifier = path.removeprefix("/api/drawing-jobs/")
+                if not re_identifier(identifier):
+                    return self.fail(404, "Unknown drawing scan")
+                with self.workspace.jobs_lock:
+                    job = deepcopy(self.workspace.drawing_jobs.get(identifier))
+                if job is None:
+                    return self.fail(404, "Drawing scan not found. It may belong to a previous service session.")
                 self.send_json(200, job)
             elif path == "/api/config":
                 profiles = json.loads((ROOT / "examples/rule-profiles.json").read_text())
@@ -201,6 +213,21 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Input must be an object")
         except (ValueError, UnicodeError) as error:
             return self.fail(400, str(error))
+        # Cancellation must remain reachable while the calculation owns RUN_LOCK.
+        if self.path.startswith("/api/drawing-jobs/") and self.path.endswith("/cancel"):
+            identifier = self.path.removeprefix("/api/drawing-jobs/").removesuffix("/cancel")
+            if not re_identifier(identifier):
+                return self.fail(404, "Unknown drawing scan")
+            with self.workspace.jobs_lock:
+                job = self.workspace.drawing_jobs.get(identifier)
+                event = self.workspace.drawing_cancellations.get(identifier)
+                if job is None or event is None:
+                    return self.fail(404, "Drawing scan not found")
+                if job["status"] in ("pending", "running"):
+                    event.set()
+                    job["cancel_requested"] = True
+                response = {"job_id": identifier, "status": job["status"], "cancel_requested": event.is_set()}
+            return self.send_json(200, response)
         if not RUN_LOCK.acquire(blocking=False):
             return self.fail(409, "Another calculation is running. Try again when it finishes.")
         release_lock = True
@@ -211,6 +238,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.inspect_autocad(payload)
             elif self.path == "/api/autocad/review":
                 self.review_autocad(payload)
+            elif self.path == "/api/autocad/scan":
+                response = self.start_drawing_scan(payload)
+                release_lock = False
+                self.send_json(202, response)
             elif self.path == "/api/autocad/optimize":
                 response = self.start_system_optimization(payload)
                 # The worker now owns the calculation lock, including when the
@@ -236,6 +267,78 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             if release_lock:
                 RUN_LOCK.release()
+
+    def start_drawing_scan(self, payload):
+        """Import and check the full snapshot without tying work to an HTTP socket."""
+        from pipe_router.autocad import validate_snapshot_request
+        from pipe_router.cad_import import inspect_cad
+        from pipe_router.drawing_scan import scan_drawing, write_drawing_scan
+
+        request = validate_snapshot_request(payload, drawing_review=True)
+        identifier = uuid.uuid4().hex
+        folder = self.workspace.output / identifier
+        folder.mkdir()
+        source = folder / request["filename"]
+        source.write_bytes(request["content"])
+        source_hash = hashlib.sha256(request["content"]).hexdigest()
+        document = deepcopy(request["document"])
+        base = {"api_version": 1, "job_id": identifier, "cad_id": identifier,
+                "source_sha256": source_hash, "document": document,
+                "status_url": f"/api/drawing-jobs/{identifier}"}
+        settings = {name: payload[name] for name in (
+            "system_type", "clearance", "padding", "rule_profile", "model_context",
+            "engineering", "reverse_flow", "min_slope") if name in payload}
+        workspace = self.workspace
+        cancel = threading.Event()
+
+        def update(**values):
+            with workspace.jobs_lock:
+                workspace.drawing_jobs[identifier].update(values)
+
+        def work():
+            try:
+                update(status="running", progress={"phase": "import", "message": "Reading all drawing geometry"})
+                cad = inspect_cad(source, source_units=request["source_units"])
+                if cad["source_sha256"] != source_hash:
+                    raise ValueError("Imported snapshot hash does not match the uploaded drawing")
+                cad["autocad_context"] = {"api_version": 1, "document": document,
+                    "selected_handles": [], "source_snapshot_sha256": source_hash, "scope": "drawing_scan"}
+                (folder / "cad-inspection.json").write_text(json.dumps(cad, allow_nan=False), encoding="utf-8")
+                summary = scan_drawing(cad, progress=lambda value: update(progress=value),
+                                       should_cancel=cancel.is_set, **settings)
+                summary.update({"api_version": 1, "units": "mm", "source_units": request["source_units"],
+                    "cad_id": identifier, "source_sha256": source_hash, "document": document,
+                    "generated_at": datetime.now(timezone.utc).isoformat()})
+                exports = {name: f"/downloads/{identifier}/{filename}" for name, filename in (
+                    ("json", "result.json"), ("report", "report.html"), ("excel", "route-review.xlsx"))}
+                summary["exports"] = exports
+                write_drawing_scan(summary, folder)
+                update(status="complete", units="mm", summary=summary, exports=exports)
+            except Exception as error:
+                update(status="failed", error=f"Drawing scan stopped: {type(error).__name__}: {error}")
+                print(f"[{identifier[:8]}] Drawing scan failed: {type(error).__name__}", flush=True)
+            finally:
+                RUN_LOCK.release()
+
+        with workspace.jobs_lock:
+            while len(workspace.drawing_jobs) >= 32:
+                oldest = next((key for key, job in workspace.drawing_jobs.items()
+                               if job["status"] in ("complete", "failed")), None)
+                if oldest is None:
+                    raise ValueError("Too many active scans")
+                del workspace.drawing_jobs[oldest]
+                workspace.drawing_cancellations.pop(oldest, None)
+            workspace.drawing_jobs[identifier] = {**base, "status": "pending",
+                "progress": {"phase": "queued", "message": "Starting full drawing scan"}}
+            workspace.drawing_cancellations[identifier] = cancel
+        try:
+            threading.Thread(target=work, name=f"pipe-scan-{identifier[:8]}", daemon=True).start()
+        except Exception:
+            with workspace.jobs_lock:
+                del workspace.drawing_jobs[identifier]
+                del workspace.drawing_cancellations[identifier]
+            raise
+        return {**base, "status": "pending"}
 
     def start_system_optimization(self, payload):
         """Compute against a cached immutable snapshot, outside the HTTP socket."""

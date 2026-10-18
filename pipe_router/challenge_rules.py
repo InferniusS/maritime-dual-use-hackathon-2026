@@ -78,6 +78,7 @@ _TOP_KEYS = {"units", "source_refs", "route_points", "nominal_diameter_mm", "shi
              "flow_direction", "nominal_size_basis_verified", "inventory_complete", "pieces", "hangers", "walkways", "valves", "evidence"}
 _EVIDENCE_KEYS = {"ship_boundary", "required_spaces", "scene_coverage", "fitting_catalog", "component_sizes"}
 STATUSES = ("pass", "fail", "needs_review", "not_applicable")
+EVIDENCE_KINDS = ("computed_geometry", "supplied_measurement", "reviewer_declaration", "unimplemented")
 
 
 def _mapping(value: Any, label: str) -> dict:
@@ -293,11 +294,17 @@ def _bound(engineering: dict, points: list) -> bool:
     return raw is not None and len(raw) == len(points) and all(math.dist(a, b) <= LENGTH_TOLERANCE_MM for a, b in zip(raw, points))
 
 
-def _finding(identity: str, status: str, page: int, message: str, *, measured: Any = None,
-             required: Any = None, refs: list[str] | None = None, severity: str = "error") -> dict:
+def _finding(identity: str, status: str, page: int, message: str, *,
+             evidence_kind: str, evidence_completeness: str, evidence_note: str,
+             measured: Any = None, required: Any = None,
+             refs: list[str] | None = None, severity: str = "error") -> dict:
+    if evidence_kind not in EVIDENCE_KINDS:
+        raise ValueError("Every rule finding needs an explicit supported evidence kind")
     return {"id": identity, "rule_id": identity, "status": status, "severity": severity,
             "source": {"document": DOCUMENT, "page": page}, "message": message,
-            "measured": measured, "required": required, "source_refs": list(dict.fromkeys(refs or []))}
+            "measured": measured, "required": required, "source_refs": list(dict.fromkeys(refs or [])),
+            "evidence_kind": evidence_kind, "evidence_completeness": evidence_completeness,
+            "evidence_note": evidence_note}
 
 
 def _inventory_finding(engineering: dict, points: list, group: str, identity: str, page: int,
@@ -331,7 +338,16 @@ def _inventory_finding(engineering: dict, points: list, group: str, identity: st
     }[status]
     if severity == "preference" and status == "fail":
         message = "At least one measurement is outside the brief's recommendation. This is not a hard prohibition."
-    return _finding(identity, status, page, message, measured=observations, required=required, refs=refs, severity=severity)
+    # Completeness and the rule result are independent: a failing measurement
+    # can still belong to a declared complete inventory. None of these records
+    # is independently extracted from CAD or verified by this evaluator.
+    completeness = ("not_provided" if records is None else "route_mismatch" if not bound
+                    else "incomplete_inventory" if not complete or any(item["status"] == "needs_review" for item in observations)
+                    else "declared_complete_inventory")
+    return _finding(identity, status, page, message, measured=observations, required=required, refs=refs, severity=severity,
+                    evidence_kind="supplied_measurement", evidence_completeness=completeness,
+                    evidence_note="Measurements, source references and inventory completeness were supplied by the reviewer. "
+                                  "The program compares these values with the rule; it does not independently extract or verify them in CAD.")
 
 
 def _limit(record: dict, field: str, *, minimum: float | None = None, maximum: float | None = None):
@@ -399,7 +415,9 @@ def _shock(layout: dict, points: list) -> dict:
     return _finding("shock_clearance", status, 1,
         "Checked continuous centerline plus outside radius and 50.8 mm clearance against supplied obstacle envelopes only. Boundary contact is conservatively rejected. Accepted fixed connection contacts remain explicit assumptions.",
         measured={"obstacle_count": len(shapes), "collisions": hits, "assumed_fixed_contacts": waived},
-        required={"minimum_clearance_mm": 50.8, "scope": "supplied local obstacle envelopes"}, refs=refs)
+        required={"minimum_clearance_mm": 50.8, "scope": "supplied local obstacle envelopes"}, refs=refs,
+        evidence_kind="computed_geometry", evidence_completeness="supplied_local_geometry_only" if shapes else "not_provided",
+        evidence_note="Calculated from this route and the supplied obstacle envelopes. Scene completeness, source fidelity and any fixed-connection identities are not established by this calculation.")
 
 
 def assess_layout(layout: dict, route: list | None = None) -> dict:
@@ -433,8 +451,15 @@ def assess_layout(layout: dict, route: list | None = None) -> dict:
             slope_measurements.append({"segment_in_flow_order": i, "actual_fall_mm": fall, "minimum_fall_mm": minimum, "horizontal_run_mm": math.hypot(end[0] - start[0], end[1] - start[1]), "status": status})
         slope_status = "fail" if any(item["status"] == "fail" for item in slope_measurements) else "needs_review" if any(item["status"] == "needs_review" for item in slope_measurements) else "pass"
         slope_message = "Checked fall along confirmed flow: 1:25 longitudinal and 1:100 transverse. Diagonal horizontal runs require a reviewed rule."
+    pitch_evidence = {
+        "evidence_kind": "computed_geometry",
+        "evidence_completeness": ("not_applicable_to_declared_system" if layout["system_type"] == "pressurized"
+                                  else "route_geometry_only" if settings["ready"] else "missing_axes_or_flow"),
+        "evidence_note": "Fall is calculated from the assessed route. System type, ship axes and flow direction are supplied declarations, not independently identified from CAD; this check does not establish complete system function.",
+    }
     findings.append(_finding("directional_drain_slope", slope_status, 2, slope_message, measured=slope_measurements,
-                             required={"longitudinal_min_slope": 0.04, "transverse_min_slope": 0.01}, refs=engineering.get("source_refs", [])))
+                             required={"longitudinal_min_slope": 0.04, "transverse_min_slope": 0.01}, refs=engineering.get("source_refs", []),
+                             **pitch_evidence))
 
     exact_pitch_status = slope_status
     if layout["system_type"] == "gravity" and slope_status == "pass":
@@ -442,7 +467,8 @@ def assess_layout(layout: dict, route: list | None = None) -> dict:
             exact_pitch_status = "needs_review"
     findings.append(_finding("directional_drain_pitch", exact_pitch_status, 2,
                              "The brief specifies 1:25 and 1:100 pitches. A steeper segment passing the minimum-fall screen still needs review because no acceptable pitch tolerance is supplied.",
-                             measured=slope_measurements, required={"longitudinal_pitch": 0.04, "transverse_pitch": 0.01, "pitch_tolerance": "not specified in brief"}))
+                             measured=slope_measurements, required={"longitudinal_pitch": 0.04, "transverse_pitch": 0.01, "pitch_tolerance": "not specified in brief"},
+                             **pitch_evidence))
 
     def inventory(group, identity, page, required, evaluate, severity="error"):
         findings.append(_inventory_finding(engineering, points, group, identity, page, required, evaluate, severity=severity))
@@ -531,11 +557,19 @@ def assess_layout(layout: dict, route: list | None = None) -> dict:
         verified = record.get("verified") is True and bool(record.get("source_refs"))
         # These assertions concern this particular assembly, not any future route.
         status = "pass" if verified and _bound(engineering, points) else "needs_review"
-        findings.append(_finding(key, status, page, message, measured={"reviewer_verified": verified, "route_binding_matches": _bound(engineering, points)}, required={"reviewed_evidence_required": True}, refs=record.get("source_refs", [])))
+        completeness = ("not_provided" if not record else "route_mismatch" if not _bound(engineering, points)
+                        else "reviewer_declared_verified" if verified else "unverified_declaration")
+        findings.append(_finding(key, status, page, message,
+                                 measured={"reviewer_verified": verified, "route_binding_matches": _bound(engineering, points)},
+                                 required={"reviewed_evidence_required": True}, refs=record.get("source_refs", []),
+                                 evidence_kind="reviewer_declaration", evidence_completeness=completeness,
+                                 evidence_note="This outcome records the reviewer's source-referenced assertion for the exact route. The program does not independently verify this assertion or inspect the referenced evidence."))
     if layout.get("protected_endpoints"):
         findings.append(_finding("fixed_connection_identity", "needs_review", 3,
                                  "Fixed endpoint contact exemptions are user assumptions. Verify port identities and connection orientations before implementation.",
-                                 measured={"assumed_connection_count": len(layout["protected_endpoints"])}, required={"verified_ports_and_orientations": True}))
+                                 measured={"assumed_connection_count": len(layout["protected_endpoints"])}, required={"verified_ports_and_orientations": True},
+                                 evidence_kind="reviewer_declaration", evidence_completeness="unverified_declaration",
+                                 evidence_note="The user declared intended contacts. Bounded geometry preservation does not establish that they are the correct equipment ports or mating orientations."))
     # Keep unimplemented brief requirements visible even when every supported
     # observation has been supplied. No metadata assertion implements a missing
     # geometric, component or system-function check.
@@ -567,11 +601,18 @@ def assess_layout(layout: dict, route: list | None = None) -> dict:
     ]
     for identity, page, message, required in pending:
         findings.append(_finding(identity, "needs_review", page, message, required=required,
-                                 severity="preference" if identity == "elbow_cutback_angles" else "error"))
+                                 severity="preference" if identity == "elbow_cutback_angles" else "error",
+                                 evidence_kind="unimplemented", evidence_completeness="not_implemented",
+                                 evidence_note="No implementation in this assessment verifies this full requirement. Listing it or supplying other reviewer declarations does not count as an automated check."))
     counts = {status: sum(item["status"] == status for item in findings) for status in STATUSES}
+    evidence_counts = {kind: sum(item["evidence_kind"] == kind for item in findings) for kind in EVIDENCE_KINDS}
+    evidence_status_counts = {kind: {status: sum(item["evidence_kind"] == kind and item["status"] == status for item in findings)
+                                     for status in STATUSES} for kind in EVIDENCE_KINDS}
     hard_failures = [item["id"] for item in findings if item["status"] == "fail" and item["severity"] == "error"]
     return {"profile": PROFILE_ID, "source_document": DOCUMENT, "units": "mm", "findings": findings,
             "counts": counts, "hard_failures": hard_failures, "complete": counts["needs_review"] == 0 and counts["fail"] == 0,
+            "evidence_counts": evidence_counts, "evidence_status_counts": evidence_status_counts,
+            "evidence_counts_note": "Counts classify finding origins, including missing and inapplicable evidence. They are not counts of independently verified CAD requirements or proof of complete model coverage.",
             "engineering_compliance_certified": False,
             "measurement_binding_matches": _bound(engineering, points),
             "tolerances": {"length_mm": LENGTH_TOLERANCE_MM, "angle_degrees": ANGLE_TOLERANCE_DEG},

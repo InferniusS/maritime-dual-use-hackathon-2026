@@ -4,6 +4,89 @@ This iteration makes the AutoCAD workflow follow the organizers' 90-second demon
 
 The word "final" refers to the package being prepared for the pitch. It does not establish that every hackathon requirement or withheld test has been passed.
 
+## Full drawing scan release, 18 October
+
+`MARITIMESCAN` adds a full inventory and screening workflow for every supported
+inferred section in the active drawing. It replaces the 50-section quick-review
+limit for this command; `MARITIMEREVIEW` remains the bounded quick workflow
+described in the earlier sections below. Full scanning does not mean every
+physical pipe, fitting or system has been identified correctly.
+
+Each section receives a global route number within its immutable drawing
+snapshot, its candidate ID, source handles and nested instance identity. The
+report retains every numbered section, including failures, uncertain geometry
+and sections left unprocessed after cancellation. It also lists unsupported
+geometry, ambiguous junctions and coverage gaps. Dense local surroundings are
+checked in bounded groups without dropping obstacles; sections exceeding the
+remaining work limits require review rather than receiving a pass.
+
+`MARITIMEFIND` uses the report's global route number to locate that section in
+the source model, frame its bounds and mark its recorded start and end. Source
+objects are highlighted where supported; a nested section highlights its owning
+block and uses the section bounds and endpoint markers for location. Red segment
+overlays locate recorded geometry concerns. Numbers belong to that snapshot,
+so a new scan can assign different numbers. Drawing or context changes invalidate
+the cached scan before finding or optimizing from it.
+
+After reviewing the inventory, `MARITIMEOPTIMIZE` can use up to twelve explicitly
+selected sections from that scan for coordinated proposals. `MARITIMEREPORT`
+opens the report for the active drawing and can collect a completed background
+scan. An interrupted wait does not erase the recorded outcomes. Cancellation
+is checked between sections; import and the current section may still need to
+finish. Re-running the scan is required to check remaining sections.
+
+Saved 3D proposals now also carry measured piece callouts on
+`MARITIME_REVIEW_DIMENSIONS`. `MARITIMEDIMENSIONS` turns them on or off. Labels
+identify the route and source, straight centerline length, outside diameter,
+and bend radius, angle and arc length, in millimetres. Their metadata retains
+global endpoints and source identity. They describe the generated review
+geometry; they are not verified fabrication dimensions or proof that suitable
+commercial parts have been selected.
+
+Rule findings and the HTML/Excel exports distinguish **computed geometry**,
+**supplied measurements**, **reviewer declarations**, and **unimplemented
+checks**. A result and its evidence completeness are separate fields. Missing
+inventories, changed-route measurements and unsupported checks remain visible;
+a reviewer declaration is not presented as an independently extracted CAD
+measurement. The scan records all finding counts but retains the first twenty
+detailed geometry findings per section. Sections beyond that detail limit need
+an individual check; the report identifies the omitted-detail count.
+
+New acceptance evidence for this release:
+
+| Check | Observed result and scope |
+| --- | --- |
+| Fresh supplied cooling DXF through the HTTP scan service | All **1416 supported inferred sections** completed screening in **36.73 seconds on the Mac**, including import and report exports. This supersedes the earlier 50-section quick-review coverage measurement for `MARITIMESCAN`. It does not establish that the full physical system is compliant or optimized. |
+| Two fresh mixed synthetic DXFs through upload, import and scan | Each contains **15 solids**, produces six supported review sections, and distinguishes a clear run, a known mid-route collision and a nine-component detour. The tests use different construction orders; the second also uses translated nested block placement. |
+| Known topology and unsupported input in those mixed tests | The three-way branch remains three separate sections with an explicit ambiguous-junction finding. An unsupported point and an unchecked curve remain coverage gaps. Source bytes, handles, placement, endpoint coordinates and diameter are checked against the authored fixture. |
+| Report provenance and missing evidence | Automated tests verify that computed geometry, supplied measurements and declarations remain distinguishable in reports, including appended allowed-space checks and incomplete inventories. |
+
+The mixed tests compare outcomes with authored geometry and independent numeric
+expectations. They are constructed analytic SAT fixtures, not organizer drawings
+or proof of Autodesk-kernel behavior. They demonstrate that the service can
+distinguish several outcomes in a newly supplied model rather than replaying a
+single saved example. They do not guarantee success on the judges' withheld
+files.
+
+**Native acceptance is still pending for this release.** The 36.73-second Mac
+measurement is not a timed 90-second AutoCAD/Snapdragon demonstration. Rehearse
+the new DLL with `MARITIMESCAN`, a report-number lookup, one justified proposal,
+Save, dimensions, view switching, Undo and the Excel export on the venue laptop.
+Capture the actual outcome and runtime. Prior screenshots validate earlier
+single-section previews, not these new commands.
+
+Whole-drawing screening is now implemented for supported inferred geometry;
+automatic redesign of the complete network is not. One system type and flow
+direction apply to each scan, so mixed pressure/drain assignments still need
+separate verified handling. Complete branch and equipment-port semantics,
+source-verified nominal sizes and commercial fittings, complete aligned
+surroundings and compartment boundaries, rounded pitched assemblies, supports,
+installation access and the remaining specification checks are still gaps.
+Some engineering rules compare supplied measurements rather than extracting
+those facts from CAD. These are outstanding hackathon acceptance requirements,
+not merely marketplace polish. See the detailed
+[requirement acceptance matrix](requirement-acceptance-matrix.md).
+
 ## Latest coordinated build, 18 October
 
 `MARITIMEOPTIMIZE` now prepares up to twelve explicitly selected, non-overlapping
