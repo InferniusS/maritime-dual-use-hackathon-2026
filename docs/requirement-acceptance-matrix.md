@@ -4,6 +4,45 @@ Audit baseline: commit `b180f9140b841f433c075e5961a812303314794f`, 18 October 20
 
 ### Changes after the baseline audit
 
+- **Conservative obstacle representation, real-model batch:** duplicate and
+  fully contained supported tube envelopes can be compacted before the existing
+  256-envelope per-solid limit, preserving their represented occupied coverage.
+  This prevents some complex supported solids from unnecessarily becoming broad
+  fallback boxes. It does not discard noncontained obstacles or certify
+  unsupported faces, actual connections or complete surroundings. Tests in
+  `test_cad_envelopes.py` retain noncontained and clipping counterexamples.
+
+- **Real-model candidate, not a passed gate:** the Fire-Fighting and Deck Wash
+  source group `CD,D0,D2,D3,D4,D8,D9,DA,DC` has a local conditional geometric
+  proposal after assuming 14 endpoint contacts are intended connections. Those
+  identities remain unverified, native reproduction is pending, and relevant
+  full-ship context is absent. The guide now specifies the source/instance
+  groups to inspect without prescribing automatic contact approval. No
+  physical savings, catalog compliance, new-algorithm success or completed
+  organizer-model repair is claimed from this probe.
+
+- **Native acceptance evidence, 18 October:** the user confirmed the ordinary
+  scan-and-optimize pipeline on the three native synthetic inputs: collision
+  repair, already clear and blocked endpoint. The accepted repair required
+  explicit padding 1500 mm; the earlier native result recorded 500 mm. A
+  screenshot shows the rounded detour and unchanged endpoints visually; the
+  user reports saving photos and reports. This is controlled-case evidence,
+  not proof of arbitrary-model support, a current organizer-model repair, or
+  full requirement compliance. Workbook measurement and save/reopen evidence
+  still need independent checking.
+
+- **OUT-01/03/05/06 traceability, real-model-batch-20261018:** combined reports
+  distinguish selection-order batch indices from source scan labels. Stable
+  candidate IDs, source handles and hashes accompany accepted geometric pieces.
+  Workbook XYZ columns are numeric; bend center, normal, radius and angle are
+  recorded. DXF mesh/dimension metadata uses the same component IDs. An export
+  reconciliation check verifies coordinate continuity, endpoints, OD, component
+  IDs and analytic-length totals; inconsistent proposal artifacts are withheld
+  with a separate export finding, without changing the recorded solver outcome.
+  Search bounds/padding and recorded diagnostics are visible. Automated evidence:
+  `test_system_export_evidence.py`. Native verification of these new outputs
+  remains open; geometric parts remain unverified catalog/fabrication records.
+
 - **ROUTE-04 generated pressure straights:** the V3 assembly check now rejects
   new free straight segments that rise obliquely. Horizontal runs may have any
   direction in the horizontal plane; vertical runs may rise or descend. The

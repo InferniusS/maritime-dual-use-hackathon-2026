@@ -92,6 +92,31 @@ def _measurement_text(value):
     return str(value)
 
 
+def search_review_panel(result):
+    """Surface recorded bounds and fixed-connection evidence, never an approval."""
+    region = result.get('search_region_review') or {}
+    connection = result.get('connection_selection_review') or {}
+    if not region and not connection:
+        return ''
+    paragraphs = []
+    if region:
+        paragraphs.extend([region.get('message', ''), 'Next action: ' + region.get('next_action', ''),
+            'Padding: ' + _measurement_text(region.get('padding_mm')) + ' mm; required clearance: '
+            + _measurement_text(region.get('clearance_mm')) + ' mm; search bounds XYZ mm: '
+            + _measurement_text(region.get('bounds_mm')),
+            'Search padding is not pipe clearance or ship containment. A bounded search failure does not prove that no physical route exists.'])
+    if connection:
+        paragraphs.append(connection.get('message', ''))
+        for endpoint in connection.get('endpoints', []):
+            blockers = '; '.join(str(item.get('source_handle', item.get('obstacle_id', ''))) + ' (' +
+                ', '.join(scope.replace('_', ' ') for scope in item.get('scopes', [])) + ')' for item in endpoint.get('blockers', []))
+            paragraphs.append(str(endpoint.get('endpoint', '')) + ': unchanged stub '
+                + _measurement_text(endpoint.get('fixed_stub_length_mm')) + ' mm; movable anchor XYZ mm: '
+                + _measurement_text(endpoint.get('movable_anchor')) + '; remaining conflicts: ' + (blockers or 'none under this check'))
+        paragraphs.append('This fixed-geometry check does not automatically verify component or port identity.')
+    return '<section class="panel"><h2>Search area and fixed connections</h2>' + ''.join('<p>' + html.escape(str(text)) + '</p>' for text in paragraphs if text) + '</section>'
+
+
 def assembly_panel(result):
     """Describe generated geometry without presenting it as catalog parts."""
     assembly = result.get('assembly')
@@ -144,7 +169,7 @@ def assembly_panel(result):
             + '</p><details><summary>Measured piece checks and remaining decisions</summary><div style="overflow-x:auto"><table><thead><tr>'
             + '<th>Check</th><th>Result</th><th>Evidence</th><th>Finding</th><th>Measurement</th></tr></thead><tbody>'
             + ''.join(check_rows) + '</tbody></table></div></details>')
-    return ('<section class="panel"><h2>' + title + '</h2>'
+    return (search_review_panel(result) + '<section class="panel"><h2>' + title + '</h2>'
             + ''.join('<p>' + html.escape(item) + '</p>' for item in details)
             + ('<ul>' + findings + '</ul>' if findings else '') + piece_panel + table + '</section>')
 
@@ -197,6 +222,11 @@ def write_review_xlsx(layout, result, destination):
         ['Model context', layout.get('model_context', {}).get('coordinate_frame', {})],
         ['Full engineering compliance', 'Not verified'],
     ]
+    if result.get('search_region_review'):
+        summary.extend([['Active search settings and evidence', result['search_region_review']],
+                        ['Next action', result['search_region_review'].get('next_action', '')]])
+    if result.get('connection_selection_review'):
+        summary.append(['Fixed connection evidence; identity unverified', result['connection_selection_review']])
     findings = [['Route', 'Rule', 'Status', 'Severity', 'Finding', 'Measured', 'Required', 'Source', 'Component references',
                  'Evidence kind', 'Evidence completeness', 'Evidence note']]
     review = result.get('challenge_review', {})

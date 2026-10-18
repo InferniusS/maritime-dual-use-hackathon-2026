@@ -394,6 +394,66 @@ def _face_envelope_capsules(face, matrix, factor):
     return capsules, None
 
 
+def _capsule_contains(outer, inner):
+    """Sufficient containment proof, including each capsule's optional clip.
+
+    Distance to a convex segment is convex along the inner segment. Thus the
+    maximum endpoint distance plus the inner radius bounds the entire inner
+    capsule. Clip containment is checked separately and is deliberately strict.
+    These inequalities remain true when both envelopes receive the same pipe
+    radius and clearance inflation. No source or envelope radius is reduced.
+    """
+    if outer["radius"] < inner["radius"]:
+        return False
+    if "clip_min" in outer:
+        low = inner.get("clip_min", [min(a, b) - inner["radius"] for a, b in zip(inner["start"], inner["end"])])
+        high = inner.get("clip_max", [max(a, b) + inner["radius"] for a, b in zip(inner["start"], inner["end"])])
+        if any(a < b for a, b in zip(low, outer["clip_min"])) or any(a > b for a, b in zip(high, outer["clip_max"])):
+            return False
+    same_axis = (inner["start"] == outer["start"] and inner["end"] == outer["end"]
+                 or inner["start"] == outer["end"] and inner["end"] == outer["start"])
+    if same_axis:
+        return True
+    a, b = Vec3(outer["start"]), Vec3(outer["end"])
+    delta = b - a
+    squared = delta.magnitude_square
+    distance = 0.0
+    for point in (Vec3(inner["start"]), Vec3(inner["end"])):
+        t = max(0.0, min(1.0, (point - a).dot(delta) / squared)) if squared else 0.0
+        distance = max(distance, (point - a - delta * t).magnitude)
+    # Do not turn floating-point equality into a containment certificate.
+    tolerance = max(1e-7, *(abs(value) * 1e-12 for cap in (outer, inner)
+                           for key in ("start", "end") for value in cap[key]))
+    return distance + inner["radius"] + tolerance <= outer["radius"]
+
+
+def _compact_envelope_capsules(capsules):
+    """Discard only redundant complete capsules; never truncate face coverage."""
+    exact = {}
+    for capsule in capsules:
+        axis = tuple(sorted((tuple(capsule["start"]), tuple(capsule["end"]))))
+        key = (axis, tuple(capsule.get("clip_min", ())), tuple(capsule.get("clip_max", ())))
+        old = exact.get(key)
+        if old is None or capsule["radius"] > old["radius"]:
+            exact[key] = capsule
+    answer = list(exact.values())
+    if len(answer) <= MAX_SOLID_ENVELOPE_CAPSULES:
+        return answer
+    retained = []
+    # Largest complete envelopes first makes containment of coincident inner
+    # pipe surfaces inexpensive without assuming they are semantic pipes.
+    ordered = sorted(answer, key=lambda item: (-item["radius"], -math.dist(item["start"], item["end"])))
+    for index, capsule in enumerate(ordered):
+        if not any(_capsule_contains(outer, capsule) for outer in retained):
+            retained.append(capsule)
+            if len(retained) > MAX_SOLID_ENVELOPE_CAPSULES:
+                # This pass never removes an earlier retained capsule, so it
+                # cannot meet the cap now. Preserve the rest for the existing
+                # all-or-nothing fallback instead of doing quadratic work.
+                return retained + ordered[index + 1:]
+    return retained
+
+
 def _solid_envelope(builder, parent_matrix, factor, base):
     """Allow capsule use only when every analytic source face is covered."""
     faces = [entity for entity in builder.entities if _name(entity) == "face"]
@@ -420,6 +480,11 @@ def _solid_envelope(builder, parent_matrix, factor, base):
             continue
         record["supported_face_count"] += 1
         capsules.extend(envelope)
+    record["source_capsule_count"] = len(capsules)
+    if not reasons:
+        capsules = _compact_envelope_capsules(capsules)
+    record["retained_capsule_count"] = len(capsules)
+    record["redundant_capsules_removed"] = record["source_capsule_count"] - len(capsules)
     if reasons:
         record["reason"] = " / ".join(sorted(set(reasons)))
     elif len(capsules) > MAX_SOLID_ENVELOPE_CAPSULES:

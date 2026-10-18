@@ -18,9 +18,17 @@ def _compact(points):
     # Remove numerical duplicate points in the movable portion only. Exact
     # protected endpoint records are reattached by the caller afterwards.
     answer = []
-    for point in points:
+    for index, point in enumerate(points):
         point = list(point)
         if answer and math.dist(answer[-1], point) < 1e-6:
+            # CAD transforms commonly leave endpoint coordinates a few ulps
+            # apart. Compact the middle, but retain the exact final endpoint:
+            # validation and saved comparison identity are intentionally exact.
+            if index == len(points) - 1:
+                if len(answer) > 1:
+                    answer[-1] = point
+                elif answer[0] != point:
+                    answer.append(point)
             continue
         if len(answer) >= 2:
             a = [b-a for a,b in zip(answer[-2],answer[-1])]
@@ -281,4 +289,9 @@ def add_pipe_proposal(result):
         'An existing CAD sampled curve is not a verified fitting count. Savings in physical bends are reported only when the original can also be planned with the same assumptions.'
     ])
     result['checks'].update({'rounded_bend_envelopes':assembly['status']=='ready','bend_tangent_space':assembly['status']=='ready'})
+    from .search_review import review_search_region
+    result['search_region_review'] = review_search_region(layout, result)
+    if assembly['status'] != 'ready' and result['search_region_review']['boundary_review'] in ('represented_barrier_spans_search_region', 'fixed_connection_conflict'):
+        result['search']['reason'] = (result['search_region_review']['message'] + ' ' +
+                                     result['search_region_review']['next_action'] + ' ' + result['search']['reason'])
     return result

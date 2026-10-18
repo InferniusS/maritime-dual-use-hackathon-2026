@@ -99,6 +99,7 @@ public sealed partial class PreviewCommand
             if (system is null) return;
             var profile = AskKeyword(editor, "Rule profile", ["Challenge", "Prototype"], "Challenge");
             if (profile is null) return;
+            editor.WriteMessage("\nClearance is the required separation from obstacles. Local review padding sets the extent of each section's search region; a small region can prevent a detour. Padding can be changed explicitly before optimization without reducing clearance.");
             if (!AskNumber(editor, "Clearance in mm", profile == "Challenge" ? 50.8 : 50, true, out var clearance) ||
                 !AskNumber(editor, "Local review padding in mm", 500, false, out var padding) ||
                 !AskNumber(editor, "Optimization grid step in mm", 250, false, out var grid)) return;

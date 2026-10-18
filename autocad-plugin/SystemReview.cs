@@ -17,7 +17,7 @@ namespace Maritime.AutoCAD;
 
 public sealed partial class PreviewCommand
 {
-    private const string RepairRelease = "repair-batch-20261018";
+    private const string RepairRelease = "real-model-batch-20261018";
 
     [CommandMethod("MARITIMEVERSION", CommandFlags.Modal)]
     public static void ShowRepairVersion()
@@ -34,7 +34,7 @@ public sealed partial class PreviewCommand
             var release = health["release"]?.GetValue<string>() ?? "older release";
             editor.WriteMessage($"\nLocal service: {release}");
             editor.WriteMessage(release == RepairRelease
-                ? "\nPlugin and service release match. Ready for the repair-batch tests."
+                ? "\nPlugin and service release match. Ready for the real-model batch tests."
                 : "\nRelease mismatch. Update both pipe_router and autocad-plugin, restart Python and AutoCAD, then reload the DLL.");
         }
         catch (System.Exception error) { editor.WriteMessage($"\nService check failed: {error.Message}\nStart the updated local Python service and retry MARITIMEVERSION."); }
@@ -133,6 +133,10 @@ public sealed partial class PreviewCommand
             try { selected = ParseSectionNumbers(answer.StringResult, candidates.Count, MaximumCoordinatedSections); break; }
             catch (InvalidOperationException exception) { editor.WriteMessage($"\n{exception.Message}"); }
         }
+        editor.WriteMessage($"\nCurrent settings: search padding {padding:G} mm; required clearance {clearance:G} mm; grid step {grid:G} mm.");
+        editor.WriteMessage("\nPadding controls how far the route search can explore around each selected section. It is NOT clearance, a hull boundary or an approved routing space. Increasing padding can include more surrounding obstacles; none are dropped to make a route pass.");
+        if (!AskNumber(editor, "Search padding for this optimization in mm (Enter keeps the value shown)", padding, false, out padding)) return;
+        editor.WriteMessage($"\nUsing search padding {padding:G} mm for this run. Required clearance remains {clearance:G} mm. The earlier scan report retains its original screening settings.");
         var sections = new JsonArray();
         var expectedLayouts = new Dictionary<string, JsonObject>();
         var selectedCandidates = new Dictionary<string, JsonNode>();
@@ -144,11 +148,16 @@ public sealed partial class PreviewCommand
             editor.WriteMessage($"\nSection {number}: {Text(candidate, "label")}; source handles {SourceHandleText(candidate)}.");
             var section = new JsonObject
             {
-                ["candidate_id"] = candidateId, ["system_type"] = system == "Gravity" ? "gravity" : "pressurized",
+                ["candidate_id"] = candidateId,
+                ["system_type"] = system == "Gravity" ? "gravity" : "pressurized",
                 ["clearance"] = clearance, ["padding"] = padding, ["grid_step"] = grid,
                 ["reverse_flow"] = reverse, ["min_slope"] = slope,
                 ["rule_profile"] = profile == "Challenge" ? "fmg-v3" : "prototype-unverified"
             };
+            // A selected-only import also numbers its local menu, so only send a
+            // global scan reference when it actually came from the full inventory.
+            if (candidate["global_number"] is JsonValue globalNumber)
+                section["source_scan_number"] = globalNumber.DeepClone();
             AddDrawingContext(section, document.Database);
             var prepareRequest = (JsonObject)section.DeepClone();
             prepareRequest["cad_id"] = cadId;
@@ -164,13 +173,17 @@ public sealed partial class PreviewCommand
                 sections.Add(section); selectedCandidates[candidateId] = candidate;
                 continue;
             }
-            var original = ReadPoints(layout["pipe"]?["original_route"], "selected section");
-            if (!ShowComparedPreview(document, original.Select(point => Scale(point, drawingScale)).ToList(), null,
-                $"Cyan shows section {number}. Check both endpoints and the source components before continuing.", false, null, true)) return;
+            if (!ShowSelectedSectionPreview(document, layout, candidate, drawingScale, number)) return;
             try
             {
                 if (!ChooseSectionConnections(document, client, section, prepareRequest, layout, fingerprint, snapshotHash, drawingScale, out var prepared)) return;
                 layout = prepared;
+                WriteConnectionSelectionReview(editor, layout);
+                if (layout["protected_endpoints"] is JsonArray { Count: > 0 })
+                {
+                    editor.WriteMessage($"\nReview the unchanged fixed connection portions for section {number}. Cyan marks the portions that must be preserved; magenta marks the rest of the original route.");
+                    if (!ShowSelectedSectionPreview(document, layout, candidate, drawingScale, number)) return;
+                }
             }
             catch (InvalidOperationException exception)
             {
@@ -189,6 +202,17 @@ public sealed partial class PreviewCommand
             sections.Add(section);
         }
         if (sections.Count == 0) return;
+        editor.WriteMessage("\nREVIEW THE ACTIVE SETTINGS BEFORE RUNNING. Search padding does not reduce required clearance. Endpoint approvals apply only to the sections and contact evidence reviewed above.");
+        foreach (var section in sections.OfType<JsonObject>())
+        {
+            var id = Text(section, "candidate_id");
+            var number = selectedCandidates[id]["selection_number"];
+            var radius = section["bend_radius_mm"] is JsonValue value ? value.ToString() + " mm" : "not set (no rounded pressure proposal prepared)";
+            editor.WriteMessage($"\nSection {number}: padding {section["padding"]} mm | clearance {section["clearance"]} mm | grid {section["grid_step"]} mm | bend centerline radius {radius}.");
+            if (section["endpoint_connections"] is JsonObject connections)
+                editor.WriteMessage($"\n  Explicitly approved endpoint contacts: {connections}. Maximum unchanged connection length: {section["max_stub_length"]} mm.");
+            else editor.WriteMessage("\n  No endpoint contacts approved.");
+        }
         var confirmation = AskKeyword(editor, $"Coordinate {sections.Count} selected sections with surrounding source geometry", ["Run", "Cancel"], "Run");
         if (confirmation != "Run") return;
         var request = new JsonObject
@@ -217,6 +241,7 @@ public sealed partial class PreviewCommand
         if (reviews.Count == 0)
         {
             editor.WriteMessage("\nNo accepted rounded section was returned. No proposal geometry will be saved. The report lists the blocked or unresolved sections.");
+            editor.WriteMessage($"\nThis run used search padding {padding:G} mm and clearance {clearance:G} mm. Check the report's search-region evidence. A blocked fixed endpoint needs connection review; more padding does not move that endpoint. For a search-region limit, MARITIMEOPTIMIZE lets you choose new padding and review the resulting contacts again.");
             return;
         }
         ShowSystemReview(document, reviews, drawingScale, () => VerifyBatchContext(document, reply, cadId, snapshotHash, fingerprint));
@@ -286,6 +311,26 @@ public sealed partial class PreviewCommand
         return true;
     }
 
+    private static void WriteConnectionSelectionReview(Editor editor, JsonObject layout)
+    {
+        if (layout["connection_selection_review"] is not JsonObject review) return;
+        editor.WriteMessage($"\nFixed connection check: {review["status"]}. {review["message"]}");
+        if (review["endpoints"] is JsonArray endpoints)
+            foreach (var endpoint in endpoints)
+            {
+                if (endpoint?["movable_anchor"] is JsonArray anchor)
+                    editor.WriteMessage($"\n  {endpoint["endpoint"]} movable-route anchor (mm): {anchor.ToJsonString()}.");
+                if (endpoint?["blockers"] is JsonArray blockers)
+                {
+                    foreach (var blocker in blockers.Take(6))
+                        editor.WriteMessage($"\n  Remaining conflict: source {blocker?["source_handle"] ?? JsonValue.Create("unknown")}, obstacle {blocker?["obstacle_id"]}; affected portions {blocker?["scopes"]}.");
+                    if (blockers.Count > 6) editor.WriteMessage($"\n  {blockers.Count - 6} additional conflicts remain in the report.");
+                }
+            }
+        if (review["status"]?.GetValue<string>() == "blocked")
+            editor.WriteMessage("\nThe prepared fixed connection still conflicts with other geometry or the required clearance. More search padding does not fix a collision on an unchanged connection. Running records the unresolved result; do not approve unrelated contacts to force acceptance.");
+    }
+
     private static string? InspectSectionContact(Document document, JsonObject layout, JsonNode contact, int number, int total, double scale)
     {
         var editor = document.Editor;
@@ -346,6 +391,7 @@ public sealed partial class PreviewCommand
             if (nested) editor.WriteMessage("\nThe owning block is highlighted; the yellow box locates the particular nested component.");
             if (highlighted.IsNull) editor.WriteMessage("\nSource highlighting unavailable. Only recorded bounds are shown; do not infer a verified connection from this box.");
             editor.WriteMessage("\nMAGENTA = selected pipe path near this endpoint. Yellow = contacted component bounds. Red = fixed endpoint. Source geometry is unchanged.");
+            editor.WriteMessage("\nInspection markers draw over source geometry; their visibility does not establish clearance or a connection.");
             if (contact["contact_summary"] is JsonValue summary) editor.WriteMessage($"\nContact evidence: {summary.GetValue<string>()}");
             if (contact["stub_preview"] is JsonObject stub)
                 editor.WriteMessage($"\nFixed-path preview: {stub["status"]}; required length {stub["required_length_mm"]} mm; current limit {stub["limit_mm"]} mm. This does not approve the contact.");
@@ -367,7 +413,7 @@ public sealed partial class PreviewCommand
         void AddLine(Point3d start, Point3d end, short color)
         {
             var line = new Line(start, end) { ColorIndex = color, LineWeight = LineWeight.LineWeight050 };
-            if (manager.AddTransient(line, TransientDrawingMode.Main, 128, viewports)) lines.Add(line);
+            if (manager.AddTransient(line, TransientDrawingMode.DirectTopmost, 128, viewports)) lines.Add(line);
             else line.Dispose();
         }
     }

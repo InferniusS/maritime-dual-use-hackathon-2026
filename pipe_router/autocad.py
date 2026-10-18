@@ -16,7 +16,7 @@ from .cad_import import inspect_cad
 from .cad_network import inspect_network
 
 API_VERSION = 1
-RELEASE_ID = "repair-batch-20261018"
+RELEASE_ID = "real-model-batch-20261018"
 MAX_CAD_BYTES = 48 * 1024 * 1024
 MAX_MATCHED_CANDIDATES = 50
 MAX_SELECTED_HANDLES = 256

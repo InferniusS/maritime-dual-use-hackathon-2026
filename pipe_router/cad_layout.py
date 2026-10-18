@@ -359,4 +359,6 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
     if endpoint_connections:
         from .workflow import with_endpoint_connections
         result = with_endpoint_connections(result, endpoint_connections, max_stub_length)
+    from .endpoint_contacts import connection_selection_review
+    result["connection_selection_review"] = connection_selection_review(result)
     return result

@@ -6,29 +6,34 @@
   "sdk_version": "10.0.402",
   "autodesk_reference_package": "AutoCAD.NET 26.0.0",
   "command": "dotnet build autocad-plugin/Maritime.AutoCAD.csproj -c Release -p:DebugType=None",
-  "dll_sha256": "0052aa111622e0ec6d7893c648ddc4250fe79920e7918032f74af5427f280fe5",
+  "dll_sha256": "642fc41d3a41880c62a6e127fed24561ef2cc9e6ba8d132f7a0975240d4c4b77",
   "source_sha256": {
     "autocad-plugin/AssemblyPreview.cs": "bcaf168222707d0f41c7f28749f2b004cf3f703f705974e470a1df391b6b7a0a",
     "autocad-plugin/CadCommand.cs": "fea8c12454a969f921908be4ded2132944fdeaf9ddace9e625b723d28aa1b806",
-    "autocad-plugin/DrawingScan.cs": "17b76e1cae24c667a1964f94a28af87041954dc0e6d363aafa61260d0ffe48f1",
+    "autocad-plugin/DrawingScan.cs": "8df02e19eb199833ee86c13c6d5139787bced8cef143335a750581bf825dd6d2",
     "autocad-plugin/PreviewCommand.cs": "dff20992ce696633efccd061a3eb5309d78e535c1d04f2755c2e7869c9afa522",
     "autocad-plugin/ReviewDimensions.cs": "a65d545fbe3f2f7ff116720b080da5533a03319bbb808f4bfed1b7e2472b4bf1",
-    "autocad-plugin/SystemReview.cs": "7178219326da814c4d259f3920b3a8e6305c923855c3fd611f38035162881c3e",
+    "autocad-plugin/SectionInspection.cs": "ecac5219bffbc8a3973933559daca0178063befabaaf0e69e43a5a9ee1bb94d9",
+    "autocad-plugin/SystemReview.cs": "eb47dd18a58b91ce12fc42ad33eca7d2d5955afc5a3af5038d05172d3f1d959b",
     "autocad-plugin/Maritime.AutoCAD.csproj": "25934cc9a6fa53a3decbd00759bccd3ececf07e99a18123fb8c336c2351ed6b1"
   },
   "build_warnings": 0,
   "build_errors": 0,
   "autocad_runtime_verified": false,
-  "runtime_check_needed": "Run MARITIMEVERSION to confirm plugin/service match; test magenta contact path, evidence and Next/Previous/Return cleanup. New native SCRIPT acceptance fixtures are invented tests. Verify normal scan repair/unchanged/blocked, dimensions, Excel, Undo and reopen on Snapdragon. Real cooling section17 remains unresolved; no current-release accepted organizer-model repair is established.",
+  "runtime_check_needed": "Verify this new release on Snapdragon: magenta route/red start/blue end, Start/End/Component/Region views and cleanup, explicit padding, prepared cyan fixed stubs, report and workbook identity/coordinates. Previous release native repair/unchanged/blocked were confirmed by the user. Real fire/deckwash conditional proposal requires verified contact selections; no confirmed native real-model repair or full compliance is established.",
   "bundled_autodesk_runtime_assemblies": false,
-  "build_feature": "Endpoint geometry evidence, sampled circular bend proposal seeds, pressure straight orientation guard, traceable contact exports and native release check",
+  "build_feature": "Focused section and fixed-connection inspection, explicit optimization padding, fixed-contact/search diagnostics, conservative redundant capsule removal, endpoint-preserving route compaction, reconciled numeric-coordinate exports",
   "previous_venue_evidence": [
     "Rounded synthetic demo displayed",
     "3D comparison saved and MARITIMEVIEW toggles displayed",
     "MARITIMEREVIEW saved three green review meshes in supplied cooling drawing",
     "Four contact inspector views displayed in AutoCAD on Snapdragon",
-    "Updated native report correctly identified four blocked endpoint contacts; no proposal saved"
+    "Updated native report correctly identified four blocked endpoint contacts; no proposal saved",
+    "User confirmed ordinary native SCRIPT input + scan/optimization repaired the invented wall collision at padding1500",
+    "User confirmed native already-clear input returned unchanged",
+    "User confirmed native blocked-port input returned blocked with no proposal"
   ],
-  "automated_tests_passed": 842,
-  "release": "repair-batch-20261018"
+  "automated_tests_passed": 888,
+  "release": "real-model-batch-20261018",
+  "automated_test_seconds": 24.25
 }

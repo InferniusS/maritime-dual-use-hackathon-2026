@@ -53,7 +53,7 @@ def test_health_identifies_compatible_local_service(autocad_workspace):
     status, result = json_request(autocad_workspace, "GET", "/api/health")
     assert status == 200
     assert result == {
-        "service": "maritime-pipe-router", "api_version": 1, "release": "repair-batch-20261018",
+        "service": "maritime-pipe-router", "api_version": 1, "release": "real-model-batch-20261018",
         "capabilities": ["cad_snapshot", "route_search", "pipe_envelopes", "challenge_rules_v3", "model_context", "review_excel", "rounded_pipe_proposal", "drawing_review", "coordinated_sections", "drawing_scan", "endpoint_contact_evidence", "sampled_curve_seeds"], "units": "mm",
     }
 

@@ -164,6 +164,17 @@ def _block(route, message, code="coordination_rejected"):
         assembly["centerline_points"] = []
         assembly.setdefault("findings", []).append({"code": code, "status": "fail", "message": message})
         result.setdefault("search", {})["reason"] = message
+        review = result.get("search_region_review") or {}
+        # A locally accepted route can still fail pair coordination or the
+        # final independent check. Its report must not keep advertising that
+        # intermediate acceptance. Preserve the more specific pre-search
+        # endpoint/boundary diagnosis when the local search itself was blocked.
+        if code != "section_search_blocked" or review.get("boundary_review") == "accepted":
+            review = deepcopy(review)
+            review.update(boundary_review="coordination_rejected", coordination_failure_code=code, message=message,
+                next_action=("Inspect the conflicting accepted sections and included source geometry. This proposal failed the coordinated or final independent check and is not saved. "
+                             "Review the selected sections and constraints before rerunning; no source obstacle or connection is automatically exempted."))
+            result["search_region_review"] = review
 
 
 def _check_invariants(route):
@@ -213,6 +224,13 @@ def optimize_sections(cad, sections, *, progress=None):
         route = {"index": index, "candidate_id": identifier, "label": candidate.get("label", identifier),
                  "source_handles": sorted({key[0] for key in _source_keys(candidate)}) if candidate else [],
                  "status": "not_processed", "message": "Not processed", "coordination": {"accepted": False}}
+        # Convenience label from the current client scan; never use a position
+        # supplied by the client to select geometry. Candidate ID and the
+        # immutable source snapshot remain authoritative.
+        source_scan_number = request.get("source_scan_number")
+        if isinstance(source_scan_number, int) and not isinstance(source_scan_number, bool) and source_scan_number > 0:
+            route["source_scan_number"] = source_scan_number
+            route["source_scan_number_basis"] = "client_scan_label; candidate_id is authoritative"
         routes.append(route)
         if time.monotonic() - started >= MAX_SECONDS:
             route["message"] = "The between-section time budget was reached. This section was not processed"

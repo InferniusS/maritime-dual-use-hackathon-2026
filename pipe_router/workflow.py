@@ -700,6 +700,8 @@ def run_workflow(layout: dict) -> dict:
             raise ValueError("For routing, reverse the route points so flow is start_to_end. Rebind any engineering measurements to that order.")
     result = _run_geometry_workflow(supplied)
     result["input_units"] = layout.get("units", "mm")
+    from .endpoint_contacts import connection_selection_review
+    result["connection_selection_review"] = connection_selection_review(result["normalized_layout"])
     if supplied.get("proposal", {}).get("mode") == "rounded_pipe":
         from .proposal import add_pipe_proposal
         result = add_pipe_proposal(result)
@@ -756,6 +758,10 @@ def run_workflow(layout: dict) -> dict:
             result["assembly"]["meshes"] = []
             result["assembly"]["findings"].append({"code": "mandatory_challenge_failure", "status": "fail", "message": "A mandatory V3 finding prevents acceptance of this proposal"})
         result["search"]["reason"] = "The geometric candidate failed a mandatory V3 check. See the challenge findings. No replacement was accepted."
+        if result.get("search_region_review"):
+            result["search_region_review"].update(
+                boundary_review="mandatory_rule_rejected", message=result["search"]["reason"],
+                next_action="Review the rejected candidate's mandatory challenge findings and their evidence. A larger search area does not waive the failed requirement.")
     result["assumptions"] = [a for a in result["assumptions"] if a != "Selected rules are an unverified prototype profile, not an official engineering standard."]
     result["assumptions"].append("V3 values come from the supplied challenge brief. Evidence coverage and engineering suitability are not automatically verified.")
     if normalized["system_type"] == "gravity":

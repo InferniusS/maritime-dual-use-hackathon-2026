@@ -5,7 +5,7 @@ import math
 import pytest
 
 from pipe_router import core
-from pipe_router.endpoint_contacts import contact_evidence, envelope_contact_margin
+from pipe_router.endpoint_contacts import contact_evidence, envelope_contact_margin, connection_selection_review
 from pipe_router.workflow import with_endpoint_connections, validate_layout_route
 
 
@@ -105,3 +105,95 @@ def test_end_contact_uses_reversed_distance_without_moving_original_endpoint():
     assert evidence["stub_preview"]["required_length_mm"] == pytest.approx(35.001, abs=1e-5)
     assert prepared["protected_endpoints"][0]["points"][-1] == [1000, 0, 0]
     assert math.dist(*prepared["protected_endpoints"][0]["points"]) == pytest.approx(35.001, abs=1e-5)
+
+
+def test_combined_review_exposes_unselected_contact_and_does_not_change_selection():
+    source = layout([box("joint", [-20, -20, -20], [5, 20, 20]),
+                     box("nearby", [-20, 15, -20], [5, 30, 20])])
+    source["cad_context"] = {"obstacle_sources": [{"id": "nearby", "source_handle": "NEIGHBOR",
+                                                   "instance_path": ["PLACEMENT"]}]}
+    prepared = with_endpoint_connections(source, {"start": ["joint"]}, 250)
+    before = deepcopy(prepared)
+    review = connection_selection_review(prepared)
+    assert prepared == before
+    assert review["status"] == "blocked"
+    start, end = review["endpoints"]
+    assert start["selected_obstacle_ids"] == ["joint"]
+    blocker, = start["blockers"]
+    assert blocker["source_handle"] == "NEIGHBOR"
+    assert blocker["instance_path"] == ["PLACEMENT"]
+    assert set(blocker["scopes"]) == {"fixed_endpoint", "unchanged_stub"}
+    assert not blocker["explicitly_selected_contact"]
+    assert start["fixed_stub_length_mm"] == pytest.approx(35.001, abs=1e-5)
+    assert start["departure_direction_into_movable_section"] == [1, 0, 0]
+    assert start["direction_basis"] == "last_preserved_segment"
+    assert not end["blockers"]
+    assert review["obstacle_count_retained"] == 2
+    assert review["all_obstacles_active_on_movable_section"]
+    assert "larger search area cannot clear" in review["message"]
+
+
+def test_combined_review_checks_nonselected_obstacle_along_stub_not_just_endpoint():
+    source = layout([box("joint", [-20, -20, -20], [150, 20, 20]),
+                     box("crossing", [100, -5, -5], [110, 5, 5])])
+    prepared = with_endpoint_connections(source, {"start": ["joint"]}, 250)
+    review = connection_selection_review(prepared)
+    blocker, = review["endpoints"][0]["blockers"]
+    assert blocker["obstacle_id"] == "crossing"
+    assert blocker["scopes"] == ["unchanged_stub"]
+    assert blocker["fixed_segment_indices"] == [0]
+    assert review["status"] == "blocked"
+
+
+def test_combined_review_checks_anchor_against_every_obstacle():
+    source = layout([box("joint", [-20, -20, -20], [5, 20, 20])])
+    prepared = with_endpoint_connections(source, {"start": ["joint"]}, 250)
+    # The helper must diagnose an unsafe anchor even for an explicitly selected
+    # contact. A later independent workflow validator remains authoritative.
+    prepared["obstacles"][0]["max"][0] += 10
+    review = connection_selection_review(prepared)
+    blocker, = review["endpoints"][0]["blockers"]
+    assert blocker["scopes"] == ["movable_anchor"]
+    assert blocker["explicitly_selected_contact"]
+
+
+def test_combined_review_no_selection_keeps_endpoint_blocked():
+    source = layout([box("joint", [-20, -20, -20], [5, 20, 20])])
+    review = connection_selection_review(source)
+    start = review["endpoints"][0]
+    assert review["status"] == "blocked"
+    assert start["fixed_stub_length_mm"] == 0
+    assert start["fixed_stub_points"] == [[0, 0, 0]]
+    assert start["blockers"][0]["scopes"] == ["fixed_endpoint"]
+    assert start["direction_basis"] == "original_reference_segment_not_a_verified_port"
+
+
+def test_combined_review_end_tangent_points_back_into_movable_route():
+    source = layout([box("end-joint", [995, -20, -20], [1020, 20, 20])])
+    prepared = with_endpoint_connections(source, {"end": ["end-joint"]}, 250)
+    review = connection_selection_review(prepared)
+    end = review["endpoints"][1]
+    assert end["fixed_endpoint"] == [1000, 0, 0]
+    assert end["movable_anchor"] == pytest.approx([964.999, 0, 0], abs=1e-5)
+    assert end["departure_direction_into_movable_section"] == [-1, 0, 0]
+    assert review["status"] == "not_blocked_by_fixed_connection_check"
+    assert not review["connection_identity_verified"]
+
+
+def test_clear_fixed_portions_are_not_a_full_route_approval():
+    source = layout([box("middle-wall", [450, -200, -200], [550, 200, 200])])
+    review = connection_selection_review(source)
+    assert review["status"] == "not_blocked_by_fixed_connection_check"
+    assert review["obstacle_count_retained"] == 1
+    assert not validate_layout_route(source, source["pipe"]["original_route"])["valid"]
+    assert "does not verify" in review["message"]
+
+
+@pytest.mark.parametrize('context', [None, 'unavailable', [], {'obstacle_sources': None}])
+def test_optional_or_unavailable_source_metadata_does_not_break_geometry_review(context):
+    source = layout([box("joint", [-20, -20, -20], [5, 20, 20])])
+    source['cad_context'] = deepcopy(context)
+    source['model_context'] = deepcopy(context)
+    review = connection_selection_review(source)
+    assert review['status'] == 'blocked'
+    assert review['endpoints'][0]['blockers'][0]['source_handle'] == 'joint'

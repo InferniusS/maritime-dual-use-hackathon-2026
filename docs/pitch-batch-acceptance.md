@@ -9,7 +9,11 @@ test. The detailed rule-by-rule audit is in
 ## What is already demonstrated
 
 The current AutoCAD workflow runs on the Snapdragon, inventories inferred pipe
-sections, locates selected sources and shows a synthetic obstacle-routing demo.
+sections, locates selected sources and processes fresh synthetic source objects
+through the ordinary scan-and-optimize pipeline. The user has confirmed the
+native collision-repair, already-clear and blocked-endpoint acceptance cases.
+The collision-repair screenshot shows a rounded green detour and cyan original
+through the wall, after explicitly changing search padding from 500 to 1500 mm.
 The contact-review release has native screenshots for four contact inspections,
 returning to selection and the corrected blocked-endpoint report. Those tests
 verify usability and diagnosis. They do not establish an accepted current-release
@@ -134,5 +138,70 @@ whose pipe identity is unverified. These are unresolved extraction/connection an
 constraint gates, not successful optimized-model evidence.
 
 Four fresh, invented CAD HTTP cases passed: collision repair, already clear,
-blocked endpoint and translated block. New native features and creation scripts
-still need Snapdragon rehearsal. Full brief compliance remains unestablished.
+blocked endpoint and translated block. The user has now exercised the first
+three native creation scripts and confirmed their expected outcomes, after
+using padding 1500 mm. The user reports capturing photos and downloading reports.
+Independent inspection of the complete new report set, Excel-versus-CAD
+measurements and save/reopen/Undo evidence remain outstanding. This does not
+establish a repaired organizer model or full brief compliance.
+
+## Next real-model batch evidence
+
+Release label: `real-model-batch-20261018`. Native runtime testing of the new
+release remains required even though the earlier three synthetic cases passed.
+Follow [real-model-batch-snapdragon.md](real-model-batch-snapdragon.md).
+
+- Combined reports distinguish **batch item** from a source scan number. A
+  source scan number is a client cross-reference, not geometry identity. The
+  immutable source hash, candidate ID and source handles identify the result.
+- Every accepted geometric piece has numeric global XYZ, OD, analytic length,
+  bend radius/angle/center/normal and a matching component ID in the review DXF.
+  The workbook's **Export reconciliation** sheet checks identity, continuity,
+  source endpoints, OD and length totals. Inconsistent artifacts are withheld
+  with an explicit export finding; recorded solver outcomes are not rewritten.
+- **Search settings** records the active padding, clearance, grid, radius and
+  bounds. The report gives the diagnosis and next action when available; search
+  bounds do not establish ship containment. A search limit never proves that
+  a physical reroute is impossible.
+- These changes advance OUT-01/02/03/05/06 evidence quality. They do not implement
+  catalog-backed fittings, complete surrounding-system inventory, rounded gravity
+  output, full topology, or remaining support/access/installation checks.
+
+Automated evidence: `tests/test_system_export_evidence.py`, including fresh
+coordinated geometry with bends, retained source labels, mismatched export
+rejection and numeric coordinate/metric reconciliation. The end-to-end acceptance
+gate remains a real-model run, inspection and saved evidence on the Snapdragon.
+
+The next real-model inspection candidate is source group
+`CD,D0,D2,D3,D4,D8,D9,DA,DC` in the organizer's
+`642_U02_Fire-Fighting and Deck Wash` drawing. A local conditional probe produced
+a straight 1739.503 mm geometric proposal at unchanged 88.9 mm OD while retaining
+137.251 mm source stubs at each end. It assumed 14 endpoint contacts were intended
+connections; that assumption has not been verified in AutoCAD. The source's
+sampled length is about 1850.453 mm, but a comparable rounded baseline is absent,
+so no physical saving is certified. This is a test candidate, not a closed
+real-model repair gate or proof of a new algorithmic success. Follow the source
+and connection inspection steps in the new guide, without automatic ALL
+approval. Its generated geometry and reports remain local, outside the release.
+
+The importer now removes only redundant or fully contained tube envelopes before
+the existing per-solid representation limit. Conservative occupied coverage is
+retained; unsupported surfaces still require a fallback or review. Tests cover
+duplicate axes, clipped extents, containment and noncontained counterexamples.
+This reduces unnecessary broad-box approximations on some complex supported
+solids, without claiming exact CAD collision geometry or semantic port identity.
+
+
+## Integrated real-model batch validation
+
+Release `real-model-batch-20261018`: 888 automated tests passed in 24.25 seconds;
+Windows plugin cross-build completed with zero warnings/errors. The updated
+report was inspected in a local browser, including active settings, fixed
+connections and distinct source-scan/batch identifiers. A replay of the user's
+native invented collision result remains blocked at padding500 with a specific
+search-cross-section diagnosis, and returns a rounded proposal at padding1500
+with exact endpoints, diameter and clearance unchanged.
+
+The new DLL's native views and real-model behavior still require a Snapdragon
+run. Conditional fire/deckwash output is not verified connection evidence or a
+completed real-model repair gate. Full engineering compliance remains open.

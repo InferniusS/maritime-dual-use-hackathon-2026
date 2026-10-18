@@ -208,15 +208,98 @@ def test_empty_and_invalid_solids_keep_ineligible_records(tmp_path):
     assert empty['reason'] == 'no_source_faces'
 
 
-def test_capsule_limit_falls_back_instead_of_truncating():
+def test_identical_ring_faces_are_compacted_without_truncating_coverage():
     builder = builder_for(torus_sat())
     face = next(entity for entity in builder.entities if entity.name == 'face')
-    # Six complete ring faces need 288 capsules. Partial coverage is forbidden.
+    # These six faces describe the very same ring. Keep one complete covering
+    # envelope instead of reverting to a box solely due to repeated surfaces.
     envelope = envelope_for(SimpleNamespace(entities=[face] * 6))
     assert envelope['face_count'] == envelope['supported_face_count'] == 6
+    assert envelope['eligible']
+    assert len(envelope['capsules']) == 48
+    assert envelope['source_capsule_count'] == 288
+    assert envelope['redundant_capsules_removed'] == 240
+
+
+def test_capsule_limit_still_falls_back_for_distinct_rings():
+    entities = []
+    for index in range(6):
+        data = torus_sat()
+        data[3 + 6] = data[3 + 6].replace('0 0 0 0 0 1 10 2', f'{100 * index} 0 0 0 0 1 10 2')
+        entities.extend(builder_for(data).entities)
+    envelope = envelope_for(SimpleNamespace(entities=entities))
     assert not envelope['eligible']
     assert envelope['capsules'] == []
     assert envelope['reason'] == 'capsule_limit_exceeded'
+    assert envelope['retained_capsule_count'] == 288
+
+
+def test_capsule_containment_requires_both_axis_and_clip_coverage():
+    outer = {'start': [0, 0, 0], 'end': [10, 0, 0], 'radius': 3,
+             'clip_min': [0, -3, -3], 'clip_max': [10, 3, 3]}
+    inner = {'start': [1, 0, 0], 'end': [9, 0, 0], 'radius': 2,
+             'clip_min': [1, -2, -2], 'clip_max': [9, 2, 2]}
+    assert cad_import._capsule_contains(outer, inner)
+    beyond_clip = {**inner, 'clip_min': [-1, -2, -2]}
+    assert not cad_import._capsule_contains(outer, beyond_clip)
+    beyond_radius = {**inner, 'start': [1, 2, 0], 'end': [9, 2, 0]}
+    assert not cad_import._capsule_contains(outer, beyond_radius)
+    # An unclipped capsule includes its round ends and cannot be discarded by
+    # a finite cylinder whose clipping planes cut those ends off.
+    assert not cad_import._capsule_contains(outer, {key: value for key, value in inner.items() if not key.startswith('clip_')})
+
+
+def test_capsule_containment_does_not_treat_nearly_equal_as_equal():
+    outer = {'start': [0, 0, 0], 'end': [10, 0, 0], 'radius': 2}
+    inner = {'start': [0, 0.00000001, 0], 'end': [10, 0.00000001, 0], 'radius': 2}
+    assert not cad_import._capsule_contains(outer, inner)
+    assert cad_import._capsule_contains(outer, {**outer, 'start': outer['end'], 'end': outer['start']})
+
+
+def test_compaction_keeps_largest_exact_capsule_and_all_distinct_clips():
+    small = {'start': [0, 0, 0], 'end': [10, 0, 0], 'radius': 1}
+    large = {**small, 'radius': 2}
+    clipped = {**large, 'clip_min': [0, -2, -2], 'clip_max': [10, 2, 2]}
+    capsules = [small, large, {**large, 'start': large['end'], 'end': large['start']}, clipped]
+    before = deepcopy(capsules)
+    result = cad_import._compact_envelope_capsules(capsules)
+    assert capsules == before
+    assert result == [large, clipped]
+
+
+def test_over_limit_capsules_can_compact_only_when_complete_envelopes_are_contained():
+    outer = {'start': [0, 0, 0], 'end': [1000, 0, 0], 'radius': 5}
+    inner = [{'start': [index + 1, 0, 0], 'end': [index + 1, 0, 0], 'radius': 2}
+             for index in range(300)]
+    assert cad_import._compact_envelope_capsules([*inner, outer]) == [outer]
+    separate = [{'start': [index * 20, 0, 0], 'end': [index * 20, 0, 0], 'radius': 2}
+                for index in range(300)]
+    assert len(cad_import._compact_envelope_capsules(separate)) == 300
+
+
+@pytest.mark.parametrize('clearance', [0, 0.1, 50.8, 250])
+def test_proven_containment_still_covers_capsule_after_common_inflation(clearance):
+    from pipe_router import core
+    outer = {'start': [1000, -10, 30], 'end': [1040, 30, 30], 'radius': 5,
+             'clip_min': [995, -15, 25], 'clip_max': [1045, 35, 35]}
+    inner = {'start': [1004, -5, 30], 'end': [1034, 25, 30], 'radius': 3,
+             'clip_min': [1000, -9, 27], 'clip_max': [1038, 29, 33]}
+    assert cad_import._capsule_contains(outer, inner)
+    shape = core._prepare_obstacle({'id': 'outer', 'min': [900, -100, -100], 'max': [1200, 100, 100],
+                                    'capsules': [outer]}, 'coverage test', clearance)
+    # Check both end spheres and intermediate cross sections. Points clipped
+    # from the inner envelope need not be contained, so apply its same clip.
+    for step in range(9):
+        center = [a + (b - a) * step / 8 for a, b in zip(inner['start'], inner['end'])]
+        for azimuth in range(32):
+            theta = math.tau * azimuth / 32
+            for elevation in (-math.pi / 2, -math.pi / 4, 0, math.pi / 4, math.pi / 2):
+                r = inner['radius'] + clearance
+                point = (center[0] + r * math.cos(elevation) * math.cos(theta),
+                         center[1] + r * math.cos(elevation) * math.sin(theta),
+                         center[2] + r * math.sin(elevation))
+                if all(a - clearance <= v <= b + clearance for v, a, b in zip(point, inner['clip_min'], inner['clip_max'])):
+                    assert core._segment_intersects_box(point, point, shape)
 
 
 def test_preview_reduction_preserves_full_envelope_data(tmp_path):

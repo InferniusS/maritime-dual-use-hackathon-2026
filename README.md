@@ -1,15 +1,15 @@
 # Maritime Dual Use Hackathon 2026
 
 
-**Latest test build:** `repair-batch-20261018`. Start with the [repair-batch Snapdragon guide](docs/repair-batch-snapdragon.md) and run `MARITIMEVERSION` after loading the DLL. This build adds endpoint contact evidence, sampled-curve proposal seeds and pressure straight-orientation checks. It does not establish a completed real-model repair or full specification compliance.
+**Latest test build:** `real-model-batch-20261018`. Start with the [real-model batch Snapdragon guide](docs/real-model-batch-snapdragon.md) and run `MARITIMEVERSION` after loading the DLL. This build adds focused route/connection inspection, explicit optimization padding, fixed-connection and search-area diagnostics, and traceable geometric-piece exports. It does not establish a completed real-model repair or full specification compliance.
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status:** the team has displayed and saved a rounded proposal in the supplied cooling drawing on the Snapdragon. The newest build adds `MARITIMESCAN` to screen the full inferred drawing inventory and `MARITIMEFIND` to locate its findings. The supplied cooling file has 1,416 inferred sections; all were geometrically screened on the Mac with none omitted. Follow the [whole-drawing Snapdragon guide](docs/whole-drawing-snapdragon-test.md). The new commands need a Windows rehearsal. Complete engineering and fabrication requirements remain tracked in the [acceptance matrix](docs/requirement-acceptance-matrix.md).
+**Current status:** the user confirmed three native AutoCAD outcomes on the Snapdragon in the previous repair batch: a rounded detour around a wall, an unchanged already-clear pipe, and a blocked fixed endpoint. These were invented source drawings processed through the normal scan-and-optimize workflow; the collision repair used padding 1500 mm. Native full-scan selection, contact inspection and blocked real-model reporting also ran. The supplied cooling file has 1,416 inferred sections; all were geometrically screened on the Mac with none omitted. A repeatable accepted current-release repair of an organizer model, independent Excel/CAD reconciliation and the new release's native rehearsal remain open. Complete engineering and fabrication requirements remain tracked in the [acceptance matrix](docs/requirement-acceptance-matrix.md).
 
 ## Start with AutoCAD
 
-**At the venue start with the [3D demo guide](docs/3d-demo-snapdragon.md).** It gives the update commands and exact AutoCAD steps. Use the [full setup guide](docs/snapdragon-guide.md) for a fresh installation. This milestone changes the Python checks, examples, reports and plugin. Replacing only `run_web.py` is not enough.
+**Start with the [current Snapdragon test guide](docs/real-model-batch-snapdragon.md).** It gives the update commands and exact AutoCAD steps. Use the [full setup guide](docs/snapdragon-guide.md) for a fresh installation. This milestone changes the Python checks, examples, reports and plugin. Replacing only `run_web.py` is not enough.
 
 The [plugin guide](autocad-plugin/README.md) explains the commands and optional source build. The short version is:
 
@@ -23,6 +23,10 @@ The Python service runs on the same laptop. You do not need to open the website 
 `MARITIMEVIEW` switches saved review layers between Original, Proposal and Both. `MARITIMEPREVIEW` and `MARITIMELINEOPTIMIZE` are available for line and polyline tests; the latter can also request a rounded pressure-pipe proposal. `MARITIMEOPTIMIZE` now coordinates sections from actual CAD solids. Saved proposals are separate review geometry. They do not replace the source pipe solids.
 
 ## What this iteration adds
+
+The source inspector focuses the selected route, individual components, either endpoint or the search region. Magenta identifies the selected route, red/blue its endpoints, cyan the prepared unchanged connection portions, and a white box the finite search region. No preview grants a connection approval. The chosen padding is shown and confirmed before preparation; final Run summaries retain clearance, grid, radius and contact choices.
+
+Reports distinguish blocked fixed geometry from limited local search space. They show preserved stubs, movable anchors, remaining source blockers and a next action. Batch item numbers no longer masquerade as global scan numbers. The geometric-piece workbook has numeric global coordinates, bend centers/normals, diameter and analytic lengths, with component IDs shared by DXF geometry and dimensions. Export reconciliation withholds inconsistent geometry without rewriting the recorded solver outcome. Catalog, functional-system and complete compliance claims remain unverified.
 
 Coordinated runs keep every requested outcome visible. Accepted proposals reserve their full pipe width and the larger requested pair clearance before later sections are searched. A final pair check rejects mutual clashes. Source objects, endpoints and diameters are preserved. Combined 3D comparison, section identity, generated-piece coordinates and rule findings are exported together. This remains order-dependent selected-section search; branches and the entire model are not silently treated as solved.
 
@@ -122,7 +126,7 @@ Efe's Mac is already set up and only needs the second command. If Python is not 
 
 Keep the terminal running. The plugin uses [http://127.0.0.1:8767/](http://127.0.0.1:8767/) on the same computer. That address will not connect to Efe's Mac from the venue. A browser is optional when using the plugin.
 
-The local service, real drawing Save and Challenge report have run on the Snapdragon laptop. The new 3D commands and a reviewed context file still need their venue test. Create the environment on each laptop instead of copying the Mac's `.venv`.
+The local service, native 3D comparison and Challenge reporting have run on the Snapdragon laptop. The new real-model batch and complete reviewed context still need their own native test. Create the environment on each laptop instead of copying the Mac's `.venv`.
 
 ## Browser fallback
 

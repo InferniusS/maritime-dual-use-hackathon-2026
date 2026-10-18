@@ -107,6 +107,24 @@ def test_contact_preparation_explains_clearance_only_without_selecting_it(cad):
     assert not contact['connection_verified']
     assert not result.get('protected_endpoints')
     assert len(result['obstacles']) == 1
+    review = result['connection_selection_review']
+    assert review['status'] == 'blocked'
+    assert review['endpoints'][1]['blockers'][0]['source_handle'] == 'NEAR-END'
+    assert review['endpoints'][1]['selected_obstacle_ids'] == []
+
+
+def test_prepared_connection_review_reflects_explicit_selected_stub(cad):
+    cad['objects'] = [cad['objects'][0], solid('END-JOINT', [100,-5,-5], [115,5,5])]
+    result = prepare_cad_layout(cad, 'A:candidate-run', clearance=5, padding=50,
+                                endpoint_connections={'end': ['cad-solid-2']})
+    review = result['connection_selection_review']
+    assert review['status'] == 'not_blocked_by_fixed_connection_check'
+    end = review['endpoints'][1]
+    assert end['selected_obstacle_ids'] == ['cad-solid-2']
+    assert end['fixed_stub_length_mm'] > 10
+    assert end['movable_anchor'] == result['protected_endpoints'][0]['points'][0]
+    assert not review['connection_identity_verified']
+    assert len(result['obstacles']) == 1
 
 
 def test_thin_geometry_gets_a_nonempty_box(cad):

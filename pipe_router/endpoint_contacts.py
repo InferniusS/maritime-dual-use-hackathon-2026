@@ -5,6 +5,7 @@ checker. They are not measurements of source B-rep surfaces or equipment ports.
 """
 from __future__ import annotations
 
+from copy import deepcopy
 import math
 
 from . import core
@@ -97,4 +98,95 @@ def contact_evidence(points, endpoint, obstacle, pipe_radius, clearance, maximum
         "stub_preview": {"status": status, "required_length_mm": required, "limit_mm": maximum_stub,
                          "reentry_distance_mm": extent["reentry_distance_mm"],
                          "scope": "Single-contact preview only. Combined selected contacts are recomputed; unrelated obstacles stay active."},
+    }
+
+
+def connection_selection_review(layout):
+    """Check the fixed portions *after* explicit contact selections are applied.
+
+    This is an early diagnostic, not a connection recognizer or a waiver. It
+    uses the same inflated envelopes as route validation, reports every
+    unselected component touching an unchanged stub, and checks the movable
+    anchor against every obstacle, including selected contacts. The rounded
+    proposal still requires its independent complete-route checks.
+    """
+    route = layout["pipe"]["original_route"]
+    margin = layout["pipe"]["diameter"] / 2 + layout["rules"]["clearance"]
+    obstacles = layout["obstacles"]
+    shapes = [(obstacle, core._prepare_obstacle(obstacle, "fixed connection review", margin))
+              for obstacle in obstacles]
+    sources = {}
+    for context_name in ("cad_context", "model_context"):
+        context = layout.get(context_name)
+        if not isinstance(context, dict):
+            continue
+        for source in context.get("obstacle_sources", []) or []:
+            if isinstance(source, dict) and isinstance(source.get("id"), str):
+                sources[source["id"]] = source
+    records = {record["endpoint"]: record for record in layout.get("protected_endpoints", [])}
+    ends = []
+    for endpoint in ("start", "end"):
+        directed = route if endpoint == "start" else list(reversed(route))
+        record = records.get(endpoint)
+        fixed = (record["points"] if endpoint == "start" else list(reversed(record["points"]))) if record else [directed[0]]
+        approved = set(record.get("obstacle_ids", [])) if record else set()
+        anchor = fixed[-1]
+        # For the end connection, this direction points backward into the
+        # movable route. It is not an equipment-port orientation inference.
+        tangent_points = fixed if len(fixed) > 1 else directed[:2]
+        tangent = None
+        for a, b in reversed(list(zip(tangent_points, tangent_points[1:]))):
+            distance = math.dist(a, b)
+            if distance > core.EPSILON:
+                tangent = [(y - x) / distance for x, y in zip(a, b)]
+                break
+        blockers = []
+        for obstacle, shape in shapes:
+            identifier = obstacle["id"]
+            scopes, segments = [], []
+            if identifier not in approved:
+                if core._segment_intersects_box(tuple(fixed[0]), tuple(fixed[0]), shape):
+                    scopes.append("fixed_endpoint")
+                for index, (a, b) in enumerate(zip(fixed, fixed[1:])):
+                    if core._segment_intersects_box(tuple(a), tuple(b), shape):
+                        segments.append(index)
+                if segments:
+                    scopes.append("unchanged_stub")
+            if record and core._segment_intersects_box(tuple(anchor), tuple(anchor), shape):
+                scopes.append("movable_anchor")
+            if not scopes:
+                continue
+            source = sources.get(identifier, {})
+            blockers.append({
+                "obstacle_id": identifier,
+                "source_handle": source.get("source_handle", identifier),
+                "instance_path": deepcopy(source.get("instance_path", [])),
+                "scopes": scopes, "fixed_segment_indices": segments,
+                "explicitly_selected_contact": identifier in approved,
+                "obstacle_method": source.get("obstacle_method", "supported_surface_capsules" if "capsules" in obstacle else "sample_box"),
+            })
+        ends.append({
+            "endpoint": endpoint,
+            "status": "blocked" if blockers else "not_blocked_by_fixed_connection_check",
+            "fixed_endpoint": list(fixed[0]), "movable_anchor": list(anchor),
+            "fixed_stub_points": deepcopy(fixed),
+            "fixed_stub_length_mm": sum(math.dist(a, b) for a, b in zip(fixed, fixed[1:])),
+            "departure_direction_into_movable_section": tangent,
+            "direction_basis": "last_preserved_segment" if record else "original_reference_segment_not_a_verified_port",
+            "selected_obstacle_ids": sorted(approved), "blockers": blockers,
+        })
+    count = sum(len(item["blockers"]) for item in ends)
+    if count:
+        message = ("Fixed connection geometry still touches an active obstacle envelope. "
+                   "A larger search area cannot clear an unchanged endpoint or stub. "
+                   "Inspect the listed source components and connection assumptions; unrelated obstacles remain active.")
+    else:
+        message = ("No active obstacle contact was found on the fixed portions under the explicit selections. "
+                   "This only permits the search to proceed; it does not verify connection identity, tangent bend room, or a complete route.")
+    return {
+        "status": "blocked" if count else "not_blocked_by_fixed_connection_check",
+        "message": message, "endpoints": ends, "blocker_count": count,
+        "obstacle_count_retained": len(obstacles), "connection_identity_verified": False,
+        "all_obstacles_active_on_movable_section": True,
+        "basis": "Conservative supplied obstacle envelopes expanded by pipe radius and clearance",
     }

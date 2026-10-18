@@ -82,6 +82,11 @@ def test_individually_valid_crossing_worker_results_cannot_both_be_accepted(monk
     assert later["result"]["assembly"]["meshes"] == []
     assert later["result"]["assembly"]["components"] == []
     assert later["coordination"]["conflict"]["clearance_mm"] == 50.8
+    review = later["result"]["search_region_review"]
+    assert review["boundary_review"] == "coordination_rejected"
+    assert review["coordination_failure_code"] == "proposal_pair_conflict"
+    assert review["message"] == later["message"]
+    assert "not saved" in review["next_action"]
 
 
 def test_pair_uses_larger_clearance_and_arc_error():
@@ -109,6 +114,10 @@ def test_all_original_obstacles_rechecked_even_if_worker_drops_them(monkeypatch)
     assert row["status"] == "blocked"
     assert row["result"]["assembly"]["meshes"] == []
     assert "original surroundings" in row["message"]
+    review = row["result"]["search_region_review"]
+    assert review["boundary_review"] == "coordination_rejected"
+    assert review["coordination_failure_code"] == "original_geometry_recheck"
+    assert review["message"] == row["message"]
 
 
 def test_unchanged_is_retained_and_missing_section_is_visible():
@@ -131,6 +140,7 @@ def test_failed_connection_has_no_automatic_waiver_and_does_not_stop_next():
     assert not first["layout"].get("protected_endpoints")
     assert result["routes"][1]["status"] == "unchanged"
     assert first["result"]["assembly"]["meshes"] == []
+    assert first["result"]["search_region_review"]["boundary_review"] in ("fixed_connection_conflict", "fixed_endpoint_contact")
 
 
 def test_explicit_original_contact_preserved_and_proposal_waiver_forbidden():

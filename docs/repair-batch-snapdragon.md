@@ -49,7 +49,12 @@ conditional tests of sections16 and27 also did not establish an accepted repair.
 
 These are clearly labelled INVENTED TESTS. They exercise the ordinary scan and
 optimization input path, not the canned MARITIMEDEMO output. Do not show them as
-an organizer model. Native execution must still be verified on the Snapdragon.
+an organizer model. On 18 October the user confirmed all three expected native
+outcomes on the Snapdragon. The collision case initially ran with padding 500
+and was blocked; rerunning with the documented padding 1500 produced the visible
+rounded detour. The unchanged and blocked explanations were then confirmed by
+the user. These are user-observed outcomes; the latest saved reports for all
+three cases have not been independently inspected together.
 
 For each case start a NEW EMPTY drawing (never run the creation script in the
 cooling model). Run `SCRIPT` and select one file from
