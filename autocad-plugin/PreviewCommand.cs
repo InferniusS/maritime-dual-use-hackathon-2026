@@ -1,5 +1,5 @@
 using Autodesk.AutoCAD.Colors;
-using Autodesk.AutoCAD.ApplicationServices;
+using AcApplication = Autodesk.AutoCAD.ApplicationServices.Application;
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
@@ -18,7 +18,7 @@ public sealed partial class PreviewCommand
     [CommandMethod("MARITIMEPREVIEW", CommandFlags.Modal)]
     public static void PreviewSelectedRoute()
     {
-        var document = Application.DocumentManager.MdiActiveDocument;
+        var document = AcApplication.DocumentManager.MdiActiveDocument;
         if (document is null)
         {
             return;
@@ -127,7 +127,7 @@ public sealed partial class PreviewCommand
     [CommandMethod("MARITIMEOPTIMIZE", CommandFlags.Modal)]
     public static void OptimizeSelectedRoute()
     {
-        var document = Application.DocumentManager.MdiActiveDocument;
+        var document = AcApplication.DocumentManager.MdiActiveDocument;
         if (document is null)
         {
             return;
