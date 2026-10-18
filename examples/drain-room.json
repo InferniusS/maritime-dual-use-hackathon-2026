@@ -1,0 +1,20 @@
+{
+  "name": "Drain around an equipment bank",
+  "provenance": "synthetic",
+  "units": "mm",
+  "system_type": "gravity",
+  "bounds": {"min": [0, 0, 0], "max": [6000, 4000, 3000]},
+  "obstacles": [{"id": "equipment-bank", "min": [2500, 0, 0], "max": [3500, 1750, 3000]}],
+  "pipe": {
+    "start": [500, 500, 1800], "end": [5500, 500, 1500], "diameter": 100,
+    "original_route": [[500, 500, 1800], [5500, 500, 1500]]
+  },
+  "rules": {"clearance": 50, "grid_step": 250, "bend_penalty": 300, "min_slope": 0.01},
+  "assumptions": [
+    "Invented drain test layout. This is not the supplied ship model.",
+    "Flow runs from the start connection to the end connection.",
+    "The 1 percent minimum slope and 50 mm clearance are provisional test settings.",
+    "Source coordinates are interpreted as millimeters. All rule values can be edited.",
+    "A valid centerline still needs a fitting design and engineering review."
+  ]
+}

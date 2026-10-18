@@ -1,0 +1,207 @@
+{
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "python": "3.12.14",
+  "resolution_m": 0.5,
+  "clearance_m": 0.1,
+  "note": "Python traced memory excludes native kernel/NumPy allocations; tracing perturbs runtime. Runtime medians use untraced runs.",
+  "scenarios": [
+    {
+      "scenario": "inefficient",
+      "median_elapsed_s": 0.0075566660016193055,
+      "samples_s": [
+        0.008425054002145771,
+        0.0075566660016193055,
+        0.00684655599980033
+      ],
+      "validation_elapsed_s": 0.0007650010011275299,
+      "python_peak_bytes": 31848,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 0,
+      "original_length_m": 19.0,
+      "proposed_length_m": 9.0,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "congested",
+      "median_elapsed_s": 0.3186400099984894,
+      "samples_s": [
+        0.3186400099984894,
+        0.3214269330019306,
+        0.2976505510014249
+      ],
+      "validation_elapsed_s": 0.004453348999959417,
+      "python_peak_bytes": 2180632,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 4858,
+      "original_length_m": 9.0,
+      "proposed_length_m": 13.614,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "drainage",
+      "median_elapsed_s": 0.0045291200003703125,
+      "samples_s": [
+        0.004518203000770882,
+        0.0045291200003703125,
+        0.005760330997873098
+      ],
+      "validation_elapsed_s": 0.0006344680004986003,
+      "python_peak_bytes": 29920,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 0,
+      "original_length_m": 15.055385138137417,
+      "proposed_length_m": 9.055385138137417,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "impossible",
+      "median_elapsed_s": 0.3881093839991081,
+      "samples_s": [
+        0.3881093839991081,
+        0.38558304700200097,
+        0.39020920399707393
+      ],
+      "validation_elapsed_s": 0.0004575580023811199,
+      "python_peak_bytes": 2873227,
+      "statuses": [
+        "no_route"
+      ],
+      "expanded": 9601,
+      "original_length_m": 9.0,
+      "proposed_length_m": 9.0,
+      "final_issues": 1,
+      "failed_checks": 1
+    },
+    {
+      "scenario": "efficient",
+      "median_elapsed_s": 0.0016431600015494041,
+      "samples_s": [
+        0.0023450900007446762,
+        0.0015227049989334773,
+        0.0016431600015494041
+      ],
+      "validation_elapsed_s": 0.0001879740011645481,
+      "python_peak_bytes": 28647,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 0,
+      "original_length_m": 9.0,
+      "proposed_length_m": 9.0,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "gravity-detour",
+      "median_elapsed_s": 0.03108346299995901,
+      "samples_s": [
+        0.042886532999546034,
+        0.03108346299995901,
+        0.030041338002774864
+      ],
+      "validation_elapsed_s": 0.0014717179983563256,
+      "python_peak_bytes": 216609,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 376,
+      "original_length_m": 8.022468448052631,
+      "proposed_length_m": 10.630945207271083,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "vent-rise",
+      "median_elapsed_s": 0.021065753000584664,
+      "samples_s": [
+        0.036307056001533056,
+        0.021065753000584664,
+        0.020229628000379307
+      ],
+      "validation_elapsed_s": 0.0012721399980364367,
+      "python_peak_bytes": 216364,
+      "statuses": [
+        "accepted"
+      ],
+      "expanded": 376,
+      "original_length_m": 8.022468448052631,
+      "proposed_length_m": 10.630945207271083,
+      "final_issues": 0,
+      "failed_checks": 0
+    },
+    {
+      "scenario": "multi-system",
+      "median_elapsed_s": 0.16048992399737472,
+      "samples_s": [
+        0.16048992399737472,
+        0.2332354559985106,
+        0.15602520100219408
+      ],
+      "validation_elapsed_s": 0.0020205990003887564,
+      "python_peak_bytes": 1228147,
+      "statuses": [
+        "accepted",
+        "accepted"
+      ],
+      "expanded": 1860,
+      "original_length_m": 15.0,
+      "proposed_length_m": 16.386,
+      "final_issues": 0,
+      "failed_checks": 0
+    }
+  ],
+  "advanced": {
+    "runtime_s": 1.792016239000077,
+    "attempts": 10,
+    "distinct_candidates": 2,
+    "candidates": [
+      {
+        "name": "Balanced / 1.0 m",
+        "metrics": {
+          "modification_distance_normalized": 11.932991228070176,
+          "length": 20.614,
+          "bends": 4,
+          "fitting_count": 4,
+          "elevation_change": 4.614,
+          "pressure_loss_pa": null,
+          "known_pressure_loss_pa": 860.4558251652569,
+          "hydraulic_coverage": "1/2",
+          "minimum_clearance_m": 0.1000000000000004,
+          "clearance_required_m": 0.1,
+          "modified_components": 1,
+          "issues": 0
+        },
+        "nondominated": true,
+        "network_cost": 4.15130676801147
+      },
+      {
+        "name": "Shortest / 1.0 m",
+        "metrics": {
+          "modification_distance_normalized": 25.424219298245614,
+          "length": 20.614,
+          "bends": 2,
+          "fitting_count": 2,
+          "elevation_change": 4.614,
+          "pressure_loss_pa": null,
+          "known_pressure_loss_pa": 627.4787060675346,
+          "hydraulic_coverage": "1/2",
+          "minimum_clearance_m": 0.24999999999999994,
+          "clearance_required_m": 0.1,
+          "modified_components": 1,
+          "issues": 0
+        },
+        "nondominated": true,
+        "network_cost": 4.800429575029014
+      }
+    ]
+  }
+}

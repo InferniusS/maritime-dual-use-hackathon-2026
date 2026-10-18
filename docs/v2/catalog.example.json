@@ -1,0 +1,17 @@
+{
+  "fittings": [
+    {
+      "id": "ILLUSTRATIVE-90-DN100",
+      "angle": 90,
+      "angle_tolerance": 0.5,
+      "radius": 0.15,
+      "nominal_diameters": [0.1],
+      "pipe_specifications": ["DEMO"],
+      "connection_length": 0,
+      "minimum_tangent": 0,
+      "k": 0.9,
+      "approved": false,
+      "provenance": "Development-only illustrative geometry and loss coefficient, not an approved commercial fitting"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+# Local environment files; keep a shareable example available.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python generated files.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Node.js dependencies and generated files.
+node_modules/
+.next/
+.nuxt/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and test output.
+build/
+dist/
+coverage/
+
+# macOS generated files.
+.DS_Store
+.AppleDouble
+._*
+
+# Local revision sessions and durable engineering audit data.
+.pipeforge-state/
+
+# Team CAD development outputs.
+# Local environment files. Keep a shareable example available.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+# Python generated files.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+
+# Node.js dependencies and generated files.
+node_modules/
+.next/
+.nuxt/
+.parcel-cache/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and test output.
+build/
+dist/
+coverage/
+**/bin/
+**/obj/
+
+# macOS generated files.
+.DS_Store
+.AppleDouble
+._*
+
+# Supplied models and generated working files.
+data/raw/
+data/generated/
+*.FCStd1
+
+# Confidential input and new derived engineering artifacts stay local.
+private-cad/
+confidential/
+local-cad-output/
+
+# This sharing branch intentionally distributes source and synthetic JSON only.
+*.dwg
+*.dxf
+*.dwt
+*.dws
+*.step
+*.stp
+*.iges
+*.igs
+*.sat
+*.sab
+*.ifc
+*.rvt
+*.nwd
+*.nwc
+*.FCStd
+*.dll
+*.exe
+*.pdb
+*.so
+*.dylib
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.pdf
+*.zip
+*.7z
+*.xlsx
+*.csv
+*.sqlite
+*.sqlite3
+*.db
+*.log
+*.pem
+*.key
+*.pfx
+*.p12
+*.crt
+credentials.json
+secrets.json
+connected-benchmark.json
+local-output/

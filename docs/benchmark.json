@@ -1,0 +1,76 @@
+{
+  "environment": {
+    "python": "3.12.14",
+    "architecture": "x86_64",
+    "resolution_m": 0.5,
+    "clearance_m": 0.1,
+    "mode": "balanced"
+  },
+  "results": [
+    {
+      "scenario": "inefficient",
+      "status": "accepted",
+      "seconds": 0.000532,
+      "expanded": 0,
+      "original_length_m": 19.0,
+      "proposed_length_m": 9.0,
+      "original_bends": 4,
+      "proposed_bends": 0,
+      "original_issues": 4,
+      "final_issues": 0,
+      "validation_failures": 0
+    },
+    {
+      "scenario": "congested",
+      "status": "accepted",
+      "seconds": 0.936011,
+      "expanded": 5486,
+      "original_length_m": 9.0,
+      "proposed_length_m": 13.614,
+      "original_bends": 0,
+      "proposed_bends": 4,
+      "original_issues": 1,
+      "final_issues": 0,
+      "validation_failures": 0
+    },
+    {
+      "scenario": "drainage",
+      "status": "accepted",
+      "seconds": 0.000249,
+      "expanded": 0,
+      "original_length_m": 15.055385138137417,
+      "proposed_length_m": 9.055385138137417,
+      "original_bends": 2,
+      "proposed_bends": 0,
+      "original_issues": 4,
+      "final_issues": 0,
+      "validation_failures": 0
+    },
+    {
+      "scenario": "impossible",
+      "status": "no_route",
+      "seconds": 1.707186,
+      "expanded": 10835,
+      "original_length_m": 9.0,
+      "proposed_length_m": 9.0,
+      "original_bends": 0,
+      "proposed_bends": 0,
+      "original_issues": 1,
+      "final_issues": 1,
+      "validation_failures": 1
+    },
+    {
+      "scenario": "efficient",
+      "status": "accepted",
+      "seconds": 0.000192,
+      "expanded": 0,
+      "original_length_m": 9.0,
+      "proposed_length_m": 9.0,
+      "original_bends": 0,
+      "proposed_bends": 0,
+      "original_issues": 0,
+      "final_issues": 0,
+      "validation_failures": 0
+    }
+  ]
+}

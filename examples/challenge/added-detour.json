@@ -1,0 +1,63 @@
+{
+  "name": "Synthetic V3 added detour",
+  "units": "mm",
+  "provenance": "synthetic",
+  "system_type": "pressurized",
+  "rule_profile": "fmg-v3",
+  "bounds": {
+    "min": [
+      -300,
+      -300,
+      0
+    ],
+    "max": [
+      2300,
+      1800,
+      1800
+    ]
+  },
+  "pipe": {
+    "start": [
+      0,
+      0,
+      1000
+    ],
+    "end": [
+      2000,
+      0,
+      1000
+    ],
+    "diameter": 40,
+    "original_route": [
+      [
+        0,
+        0,
+        1000
+      ],
+      [
+        0,
+        1000,
+        1000
+      ],
+      [
+        2000,
+        1000,
+        1000
+      ],
+      [
+        2000,
+        0,
+        1000
+      ]
+    ]
+  },
+  "obstacles": [],
+  "rules": {
+    "clearance": 50.8,
+    "grid_step": 250,
+    "bend_penalty": 300
+  },
+  "assumptions": [
+    "Invented challenge regression fixture. Not an organizer drawing."
+  ]
+}

@@ -1,0 +1,724 @@
+[
+  {
+    "scenario": "inefficient",
+    "elapsed_s": 0.01248110300002736,
+    "candidates": [
+      {
+        "pipe_id": "P-101",
+        "status": "accepted",
+        "reason": "Direct feasible connector",
+        "runtime_s": 0.00354408500061254,
+        "expanded": 0,
+        "before": {
+          "length": 19.0,
+          "bends": 4,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 1016.5293926266502
+          }
+        },
+        "after": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "validation": [
+          {
+            "requirement": "endpoints",
+            "status": "PASS",
+            "detail": "Fixed connection coordinates"
+          },
+          {
+            "requirement": "size_preservation",
+            "status": "PASS",
+            "detail": "Nominal, outer and inner diameters unchanged"
+          },
+          {
+            "requirement": "permissions",
+            "status": "PASS",
+            "detail": "Only explicitly editable routes can change"
+          },
+          {
+            "requirement": "fixed_environment",
+            "status": "PASS",
+            "detail": "Structure and equipment remain fixed"
+          },
+          {
+            "requirement": "other_systems_preserved",
+            "status": "PASS",
+            "detail": "Other systems unchanged in this single-route proposal"
+          },
+          {
+            "requirement": "system_identity",
+            "status": "PASS",
+            "detail": "System, sizes, operating conditions, permissions, rules and catalog unchanged"
+          },
+          {
+            "requirement": "coordinate_reference",
+            "status": "PASS",
+            "detail": "Source identity, units and coordinate frame preserved"
+          },
+          {
+            "requirement": "collision_clearance",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "containment",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "fitting_geometry",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "functional_slope",
+            "status": "NOT APPLICABLE",
+            "detail": "Pressure system"
+          },
+          {
+            "requirement": "organizer_standards",
+            "status": "UNVERIFIED",
+            "detail": "No official standards supplied; not certified"
+          },
+          {
+            "requirement": "commercial_fittings",
+            "status": "UNVERIFIED",
+            "detail": "Catalog approval metadata; demonstration fittings are unverified"
+          },
+          {
+            "requirement": "nozzle_orientation",
+            "status": "UNVERIFIED",
+            "detail": "Endpoint positions checked; nozzle orientation and joint connectivity metadata absent"
+          }
+        ],
+        "objective_before": {
+          "value": 1.35,
+          "terms": {
+            "length": 1.0,
+            "bends": 1.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "objective_after": {
+          "value": 1.1229224376731304,
+          "terms": {
+            "length": 0.47368421052631576,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 0.25655800929500117,
+            "modification": 6.492382271468145
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "hydraulic_objective": "active"
+      }
+    ]
+  },
+  {
+    "scenario": "congested",
+    "elapsed_s": 1.215577940998628,
+    "candidates": [
+      {
+        "pipe_id": "P-101",
+        "status": "accepted",
+        "reason": "Direction-aware A*; finite search graph, no global optimality claim",
+        "runtime_s": 1.2058358129997941,
+        "expanded": 5486,
+        "before": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "after": {
+          "length": 13.614,
+          "bends": 4,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 860.4558251652569
+          }
+        },
+        "validation": [
+          {
+            "requirement": "endpoints",
+            "status": "PASS",
+            "detail": "Fixed connection coordinates"
+          },
+          {
+            "requirement": "size_preservation",
+            "status": "PASS",
+            "detail": "Nominal, outer and inner diameters unchanged"
+          },
+          {
+            "requirement": "permissions",
+            "status": "PASS",
+            "detail": "Only explicitly editable routes can change"
+          },
+          {
+            "requirement": "fixed_environment",
+            "status": "PASS",
+            "detail": "Structure and equipment remain fixed"
+          },
+          {
+            "requirement": "other_systems_preserved",
+            "status": "PASS",
+            "detail": "Other systems unchanged in this single-route proposal"
+          },
+          {
+            "requirement": "system_identity",
+            "status": "PASS",
+            "detail": "System, sizes, operating conditions, permissions, rules and catalog unchanged"
+          },
+          {
+            "requirement": "coordinate_reference",
+            "status": "PASS",
+            "detail": "Source identity, units and coordinate frame preserved"
+          },
+          {
+            "requirement": "collision_clearance",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "containment",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "fitting_geometry",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "functional_slope",
+            "status": "NOT APPLICABLE",
+            "detail": "Pressure system"
+          },
+          {
+            "requirement": "organizer_standards",
+            "status": "UNVERIFIED",
+            "detail": "No official standards supplied; not certified"
+          },
+          {
+            "requirement": "commercial_fittings",
+            "status": "UNVERIFIED",
+            "detail": "Catalog approval metadata; demonstration fittings are unverified"
+          },
+          {
+            "requirement": "nozzle_orientation",
+            "status": "UNVERIFIED",
+            "detail": "Endpoint positions checked; nozzle orientation and joint connectivity metadata absent"
+          }
+        ],
+        "objective_before": {
+          "value": 1.0,
+          "terms": {
+            "length": 1.0,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "objective_after": {
+          "value": 4.15130676801147,
+          "terms": {
+            "length": 1.5126666666666668,
+            "bends": 4.0,
+            "elevation": 0.302273190251905,
+            "hydraulic": 3.2993095284208427,
+            "modification": 11.932991228070176
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "hydraulic_objective": "active"
+      }
+    ]
+  },
+  {
+    "scenario": "drainage",
+    "elapsed_s": 0.0037113419984962093,
+    "candidates": [
+      {
+        "pipe_id": "P-101",
+        "status": "accepted",
+        "reason": "Direct feasible connector",
+        "runtime_s": 0.00045727399992756546,
+        "expanded": 0,
+        "before": {
+          "length": 15.055385138137417,
+          "bends": 2,
+          "hydraulics": {
+            "status": "UNVERIFIED",
+            "reason": "Full-pipe pressure model does not establish gravity drainage capacity"
+          }
+        },
+        "after": {
+          "length": 9.055385138137417,
+          "bends": 0,
+          "hydraulics": {
+            "status": "UNVERIFIED",
+            "reason": "Full-pipe pressure model does not establish gravity drainage capacity"
+          }
+        },
+        "validation": [
+          {
+            "requirement": "endpoints",
+            "status": "PASS",
+            "detail": "Fixed connection coordinates"
+          },
+          {
+            "requirement": "size_preservation",
+            "status": "PASS",
+            "detail": "Nominal, outer and inner diameters unchanged"
+          },
+          {
+            "requirement": "permissions",
+            "status": "PASS",
+            "detail": "Only explicitly editable routes can change"
+          },
+          {
+            "requirement": "fixed_environment",
+            "status": "PASS",
+            "detail": "Structure and equipment remain fixed"
+          },
+          {
+            "requirement": "other_systems_preserved",
+            "status": "PASS",
+            "detail": "Other systems unchanged in this single-route proposal"
+          },
+          {
+            "requirement": "system_identity",
+            "status": "PASS",
+            "detail": "System, sizes, operating conditions, permissions, rules and catalog unchanged"
+          },
+          {
+            "requirement": "coordinate_reference",
+            "status": "PASS",
+            "detail": "Source identity, units and coordinate frame preserved"
+          },
+          {
+            "requirement": "collision_clearance",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "containment",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "fitting_geometry",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "functional_slope",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "organizer_standards",
+            "status": "UNVERIFIED",
+            "detail": "No official standards supplied; not certified"
+          },
+          {
+            "requirement": "commercial_fittings",
+            "status": "UNVERIFIED",
+            "detail": "Catalog approval metadata; demonstration fittings are unverified"
+          },
+          {
+            "requirement": "nozzle_orientation",
+            "status": "UNVERIFIED",
+            "detail": "Endpoint positions checked; nozzle orientation and joint connectivity metadata absent"
+          }
+        ],
+        "objective_before": {
+          "value": 1.3598268267312064,
+          "terms": {
+            "length": 1.0,
+            "bends": 1.0,
+            "elevation": 0.06551217820804184,
+            "hydraulic": null,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": false
+        },
+        "objective_after": {
+          "value": 1.7013132539786815,
+          "terms": {
+            "length": 0.6014715037212065,
+            "bends": 0.0,
+            "elevation": 0.06551217820804184,
+            "hydraulic": null,
+            "modification": 10.900149235262685
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": false
+        },
+        "hydraulic_objective": "unverified; hydraulic term unavailable"
+      }
+    ]
+  },
+  {
+    "scenario": "impossible",
+    "elapsed_s": 2.330490677999478,
+    "candidates": [
+      {
+        "pipe_id": "P-101",
+        "status": "no_route",
+        "reason": "No route on this conservative grid; this does not prove continuous-space infeasibility",
+        "runtime_s": 2.327516290000858,
+        "expanded": 10835,
+        "before": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "after": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "validation": [
+          {
+            "requirement": "endpoints",
+            "status": "PASS",
+            "detail": "Fixed connection coordinates"
+          },
+          {
+            "requirement": "size_preservation",
+            "status": "PASS",
+            "detail": "Nominal, outer and inner diameters unchanged"
+          },
+          {
+            "requirement": "permissions",
+            "status": "PASS",
+            "detail": "Only explicitly editable routes can change"
+          },
+          {
+            "requirement": "fixed_environment",
+            "status": "PASS",
+            "detail": "Structure and equipment remain fixed"
+          },
+          {
+            "requirement": "other_systems_preserved",
+            "status": "PASS",
+            "detail": "Other systems unchanged in this single-route proposal"
+          },
+          {
+            "requirement": "system_identity",
+            "status": "PASS",
+            "detail": "System, sizes, operating conditions, permissions, rules and catalog unchanged"
+          },
+          {
+            "requirement": "coordinate_reference",
+            "status": "PASS",
+            "detail": "Source identity, units and coordinate frame preserved"
+          },
+          {
+            "requirement": "collision_clearance",
+            "status": "FAIL",
+            "detail": "Insufficient separation from structure"
+          },
+          {
+            "requirement": "containment",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "fitting_geometry",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "functional_slope",
+            "status": "NOT APPLICABLE",
+            "detail": "Pressure system"
+          },
+          {
+            "requirement": "organizer_standards",
+            "status": "UNVERIFIED",
+            "detail": "No official standards supplied; not certified"
+          },
+          {
+            "requirement": "commercial_fittings",
+            "status": "UNVERIFIED",
+            "detail": "Catalog approval metadata; demonstration fittings are unverified"
+          },
+          {
+            "requirement": "nozzle_orientation",
+            "status": "UNVERIFIED",
+            "detail": "Endpoint positions checked; nozzle orientation and joint connectivity metadata absent"
+          }
+        ],
+        "objective_before": {
+          "value": 1.0,
+          "terms": {
+            "length": 1.0,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "objective_after": {
+          "value": 1.0,
+          "terms": {
+            "length": 1.0,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "hydraulic_objective": "active"
+      }
+    ]
+  },
+  {
+    "scenario": "efficient",
+    "elapsed_s": 0.001444378000087454,
+    "candidates": [
+      {
+        "pipe_id": "P-101",
+        "status": "accepted",
+        "reason": "Direct feasible connector; retained original with equal or lower evaluated objective",
+        "runtime_s": 0.00020723999841720797,
+        "expanded": 0,
+        "before": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "after": {
+          "length": 9.0,
+          "bends": 0,
+          "hydraulics": {
+            "status": "PASS",
+            "method": "Darcy-Weisbach; laminar or Swamee-Jain; straight centerline length, catalog K",
+            "velocity": 0.5092958178940651,
+            "reynolds": 50827.72262582769,
+            "friction_factor": 0.022388357996027747,
+            "pressure_loss_pa": 260.79875736215
+          }
+        },
+        "validation": [
+          {
+            "requirement": "endpoints",
+            "status": "PASS",
+            "detail": "Fixed connection coordinates"
+          },
+          {
+            "requirement": "size_preservation",
+            "status": "PASS",
+            "detail": "Nominal, outer and inner diameters unchanged"
+          },
+          {
+            "requirement": "permissions",
+            "status": "PASS",
+            "detail": "Only explicitly editable routes can change"
+          },
+          {
+            "requirement": "fixed_environment",
+            "status": "PASS",
+            "detail": "Structure and equipment remain fixed"
+          },
+          {
+            "requirement": "other_systems_preserved",
+            "status": "PASS",
+            "detail": "Other systems unchanged in this single-route proposal"
+          },
+          {
+            "requirement": "system_identity",
+            "status": "PASS",
+            "detail": "System, sizes, operating conditions, permissions, rules and catalog unchanged"
+          },
+          {
+            "requirement": "coordinate_reference",
+            "status": "PASS",
+            "detail": "Source identity, units and coordinate frame preserved"
+          },
+          {
+            "requirement": "collision_clearance",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "containment",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "fitting_geometry",
+            "status": "PASS",
+            "detail": "Evaluated against explicit model constraints"
+          },
+          {
+            "requirement": "functional_slope",
+            "status": "NOT APPLICABLE",
+            "detail": "Pressure system"
+          },
+          {
+            "requirement": "organizer_standards",
+            "status": "UNVERIFIED",
+            "detail": "No official standards supplied; not certified"
+          },
+          {
+            "requirement": "commercial_fittings",
+            "status": "UNVERIFIED",
+            "detail": "Catalog approval metadata; demonstration fittings are unverified"
+          },
+          {
+            "requirement": "nozzle_orientation",
+            "status": "UNVERIFIED",
+            "detail": "Endpoint positions checked; nozzle orientation and joint connectivity metadata absent"
+          }
+        ],
+        "objective_before": {
+          "value": 1.0,
+          "terms": {
+            "length": 1.0,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "objective_after": {
+          "value": 1.0,
+          "terms": {
+            "length": 1.0,
+            "bends": 0.0,
+            "elevation": 0.0,
+            "hydraulic": 1.0,
+            "modification": 0.0
+          },
+          "weights": {
+            "length": 1,
+            "bends": 0.35,
+            "elevation": 0.15,
+            "hydraulic": 0,
+            "modification": 0.1
+          },
+          "hydraulic_term_available": true
+        },
+        "hydraulic_objective": "active"
+      }
+    ]
+  }
+]

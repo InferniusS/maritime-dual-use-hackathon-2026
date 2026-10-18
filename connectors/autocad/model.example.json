@@ -1,0 +1,48 @@
+{
+  "model": {
+    "id": "native-dwg-example",
+    "name": "Explicitly mapped AutoCAD example",
+    "units": "m",
+    "coordinate_system": "Source WCS, right-handed Z up; scaled from explicit INSUNITS to meters; no translation",
+    "bounds": {"min": [0, 0, 0], "max": [12, 8, 5]},
+    "pipes": [
+      {
+        "id": "P-101",
+        "system_id": "Cooling water",
+        "category": "pressure",
+        "editable": true,
+        "nominal_diameter": 0.1,
+        "outer_diameter": 0.114,
+        "inner_diameter": 0.1,
+        "flow_rate": 0.004,
+        "density": 998,
+        "viscosity": 0.001,
+        "roughness": 0.000045,
+        "points": [[1, 1, 1], [1, 6, 1], [4, 6, 1], [4, 3, 1], [10, 3, 1], [10, 1, 1]],
+        "fittings": [
+          {
+            "id": "ILLUSTRATIVE-90",
+            "angle": 90,
+            "radius": 0.15,
+            "approved": false,
+            "k": 0.9,
+            "provenance": "Illustrative development values; requires an engineer-supplied approved catalog"
+          }
+        ]
+      }
+    ],
+    "obstacles": [
+      {"id": "ENGINE", "kind": "equipment", "editable": false, "min": [4, 4, 0.2], "max": [6, 6, 2]}
+    ],
+    "assumptions": [
+      "Engineering identity, system, sizes, hydraulic properties and fitting values are explicitly supplied metadata, not inferred from CAD.",
+      "Mapped Polyline3d centerlines replace metadata points after canonical-meter conversion.",
+      "Mapped obstacle extents are conservative world-axis-aligned boxes, not exact CAD solid collision geometry.",
+      "This example contains illustrative values, not an approved naval engineering standard."
+    ]
+  },
+  "object_map": {
+    "P-101": "REPLACE_WITH_PIPE_HEX_HANDLE",
+    "ENGINE": "REPLACE_WITH_OBSTACLE_HEX_HANDLE"
+  }
+}

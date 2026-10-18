@@ -1,0 +1,415 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "c-connected-branch",
+  "title": "C \u2014 Connected branch and movable valve",
+  "description": "Three fixed equipment ports, two valves and one tee. A permitted valve move can shorten two connected spans; branch incidence and fixed ports must remain unchanged.",
+  "units": "mm",
+  "provenance": "synthetic",
+  "drawing": {
+    "id": "SYNTHETIC-C-CONNECTED-BRANCH",
+    "revision": "fixture-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      1,
+      0,
+      0
+    ],
+    "athwartship": [
+      0,
+      1,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      8000,
+      6000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "cooling",
+      "type": "pressurized"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "pump",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        500,
+        2000,
+        1500
+      ],
+      "cad_handle": "SYN-PUMP",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "valve-a",
+      "type": "valve",
+      "system_id": "cooling",
+      "position": [
+        2000,
+        3500,
+        1500
+      ],
+      "cad_handle": "SYN-VALVE-A",
+      "instance_path": [],
+      "fixed": false,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      },
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500,
+      "movement_region": {
+        "min": [
+          1500,
+          1500,
+          1400
+        ],
+        "max": [
+          2500,
+          4000,
+          1600
+        ]
+      },
+      "allowed_positions": [
+        [
+          2000,
+          3500,
+          1500
+        ],
+        [
+          2000,
+          2000,
+          1500
+        ]
+      ]
+    },
+    {
+      "id": "tee",
+      "type": "tee",
+      "system_id": "cooling",
+      "position": [
+        4000,
+        2000,
+        1500
+      ],
+      "cad_handle": "SYN-TEE",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "valve-b",
+      "type": "valve",
+      "system_id": "cooling",
+      "position": [
+        5500,
+        2000,
+        1500
+      ],
+      "cad_handle": "SYN-VALVE-B",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      },
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "cooler",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        7500,
+        2000,
+        1500
+      ],
+      "cad_handle": "SYN-COOLER",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    },
+    {
+      "id": "branch-equipment",
+      "type": "equipment_port",
+      "system_id": "cooling",
+      "position": [
+        4000,
+        5500,
+        1500
+      ],
+      "cad_handle": "SYN-BRANCH-EQUIPMENT",
+      "instance_path": [],
+      "fixed": true,
+      "nominal_diameter_mm": 50,
+      "dimensions": {
+        "body_radius_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250
+      }
+    }
+  ],
+  "spans": [
+    {
+      "id": "pump-valve",
+      "from_node": "pump",
+      "to_node": "valve-a",
+      "system_id": "cooling",
+      "cad_handle": "SYN-PUMP-VALVE",
+      "instance_path": [],
+      "points": [
+        [
+          500,
+          2000,
+          1500
+        ],
+        [
+          500,
+          3500,
+          1500
+        ],
+        [
+          2000,
+          3500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "valve-tee",
+      "from_node": "valve-a",
+      "to_node": "tee",
+      "system_id": "cooling",
+      "cad_handle": "SYN-VALVE-TEE",
+      "instance_path": [],
+      "points": [
+        [
+          2000,
+          3500,
+          1500
+        ],
+        [
+          4000,
+          3500,
+          1500
+        ],
+        [
+          4000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "tee-valve",
+      "from_node": "tee",
+      "to_node": "valve-b",
+      "system_id": "cooling",
+      "cad_handle": "SYN-TEE-VALVE",
+      "instance_path": [],
+      "points": [
+        [
+          4000,
+          2000,
+          1500
+        ],
+        [
+          5500,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "valve-cooler",
+      "from_node": "valve-b",
+      "to_node": "cooler",
+      "system_id": "cooling",
+      "cad_handle": "SYN-VALVE-COOLER",
+      "instance_path": [],
+      "points": [
+        [
+          5500,
+          2000,
+          1500
+        ],
+        [
+          7500,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch",
+      "from_node": "tee",
+      "to_node": "branch-equipment",
+      "system_id": "cooling",
+      "cad_handle": "SYN-BRANCH",
+      "instance_path": [],
+      "points": [
+        [
+          4000,
+          2000,
+          1500
+        ],
+        [
+          4000,
+          5500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Synthetic demonstration catalog; no ship-approved fabrication authority",
+        "radius_mm": 200,
+        "body_radius_mm": 35,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    }
+  ],
+  "obstacles": [],
+  "compartments": [],
+  "supports": [],
+  "penetrations": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "All geometry is invented; coverage applies only to this synthetic scene."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "unresolved_connections": [],
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  }
+}

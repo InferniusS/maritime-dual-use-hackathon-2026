@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PipeForge Edge 4.0 · Connected networks</title>
+<link rel="stylesheet" href="/connected/connected.css">
+<script src="/connected/plotly.min.js"></script><script src="/connected/connected.js" defer></script>
+</head>
+<body>
+<header><div><small>PIPEFORGE EDGE 4.0</small><h1>Connected piping networks</h1><p>Review topology, coordinated routes, physical buildability, and CAD instructions.</p></div><a href="/">Existing workspace</a></header>
+<div class="notice">Engineering decision support. The Fincantieri profile uses the supplied challenge transcription; original standards and approved component catalogs require engineering review. Missing evidence remains UNVERIFIED.</div>
+<div id="error" role="alert" hidden></div>
+<main>
+<aside>
+<section><h2>Network source</h2><label for="example">Synthetic engineering scenario</label><select id="example"></select><button id="load-example">Load scenario</button><label for="network-file">Open authorized network JSON</label><input id="network-file" type="file" accept=".json"><p class="hint">Processing stays on this local service. Import confidential geometry only where your authorization permits it.</p><label for="cad-id">Imported CAD snapshot ID</label><input id="cad-id" placeholder="Snapshot ID from the existing CAD workspace"><label for="cad-bounds-min">Permitted volume minimum X, Y, Z (mm)</label><input id="cad-bounds-min" placeholder="Explicit authorized global minimum"><label for="cad-bounds-max">Permitted volume maximum X, Y, Z (mm)</label><input id="cad-bounds-max" placeholder="Explicit authorized global maximum"><button id="inspect-cad">Reconstruct imported CAD network</button></section>
+<section><h2>Topology and constraints</h2><div id="network-summary" aria-live="polite">Load a network.</div><div id="connections"></div><details><summary>Edit network and connection metadata</summary><p class="hint">Correct node IDs, exact WCS positions, systems, permitted movement regions, and required compartments. Changes invalidate the current proposal.</p><textarea id="network-json" aria-label="Network JSON" spellcheck="false"></textarea><button id="apply-json">Apply and inspect edits</button><button id="save-json">Save network JSON</button></details></section>
+<section><h2>Coordinated search</h2><label for="evaluations">Maximum network evaluations</label><input id="evaluations" type="number" value="24" min="1" max="64"><button id="optimize" class="primary">Optimize connected network</button><button id="cancel" hidden>Cancel calculation</button><button id="validate">Validate network</button><p id="progress" role="status">Ready.</p></section>
+</aside>
+<div class="results">
+<section><h2 id="network-name">Engineering network review</h2><div id="outcome" role="status">No calculation yet</div><div id="metrics" class="metrics"></div><p id="source-info" class="hint"></p></section>
+<section><div class="plot-controls"><label><input id="show-original" type="checkbox" checked>Original</label><label><input id="show-proposed" type="checkbox" checked>Proposed</label><label><input id="show-context" type="checkbox" checked>Structure and systems</label><label><input id="show-physical" type="checkbox" checked>Physical pipe and fitting envelopes</label><label><input id="show-labels" type="checkbox" checked>IDs and dimensions</label></div><div id="network-plot" aria-label="Scaled global piping network visualization"></div><p class="hint">Global WCS coordinates in mm. Equal axis scale; orange original, green proposal, blue fixed ports. Lines show centerlines; collision checks use finite pipe and fitting envelopes. Select a component to inspect coordinates.</p><p id="geometry-notes" class="hint"></p><div id="selection" aria-live="polite"></div></section>
+<section><h2>Independent network validation</h2><div id="verification"></div><label for="check-filter">Show checks</label><select id="check-filter"><option value="ALL">All</option><option>FAIL</option><option>UNVERIFIED</option><option>PASS</option><option>NOT_APPLICABLE</option></select><div id="checks"></div></section>
+<section><h2>CAD implementation review</h2><p id="review-state">Calculate a proposal to review exact changes and generate the implementation bundle.</p><label class="approval"><input id="approve" type="checkbox">I reviewed this drawing revision, exact coordinates, validation findings, and unresolved engineering assumptions. Generate instructions for designer review.</label><button id="export" disabled>Generate reviewed CAD instructions and Excel schedule</button><div id="downloads"></div><p class="hint">Export creates a review package. Source CAD entities are preserved; no native CAD modification is performed by this page.</p></section>
+<details><summary>Exact original and proposed WCS coordinates</summary><div id="coordinates"></div></details>
+</div>
+</main>
+</body></html>

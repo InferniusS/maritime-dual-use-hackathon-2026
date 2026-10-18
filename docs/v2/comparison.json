@@ -1,0 +1,163 @@
+{
+  "baseline_commit": "afb9626befed67be329e58e502ead1aafff97fd6",
+  "python": "3.12.14",
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "method": "Sequential separate subprocesses, same pinned runtime and unchanged fixtures, 3 untraced runs each at 0.5m resolution and 0.1m clearance. Runtime ratios are observations, not guaranteed speedups.",
+  "results": [
+    {
+      "scenario": "inefficient",
+      "baseline": {
+        "scenario": "inefficient",
+        "samples_s": [
+          0.0062994899999466725,
+          0.010828562997630797,
+          0.007275471998582361
+        ],
+        "median_s": 0.007275471998582361,
+        "status": "accepted",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 0
+      },
+      "v2": {
+        "scenario": "inefficient",
+        "samples_s": [
+          0.010885846000746824,
+          0.007345485002588248,
+          0.00874869499966735
+        ],
+        "median_s": 0.00874869499966735,
+        "status": "accepted",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 0
+      },
+      "observed_runtime_ratio": 0.8316065423310557,
+      "same_status_and_route_metrics": true
+    },
+    {
+      "scenario": "congested",
+      "baseline": {
+        "scenario": "congested",
+        "samples_s": [
+          1.3123321830025816,
+          1.368604895000317,
+          0.9273609880001459
+        ],
+        "median_s": 1.3123321830025816,
+        "status": "accepted",
+        "length_m": 13.614,
+        "bends": 4,
+        "expanded": 5486
+      },
+      "v2": {
+        "scenario": "congested",
+        "samples_s": [
+          0.32402803399963886,
+          0.3010925610033155,
+          0.3328177859984862
+        ],
+        "median_s": 0.32402803399963886,
+        "status": "accepted",
+        "length_m": 13.614,
+        "bends": 4,
+        "expanded": 4858
+      },
+      "observed_runtime_ratio": 4.050057542255878,
+      "same_status_and_route_metrics": true
+    },
+    {
+      "scenario": "drainage",
+      "baseline": {
+        "scenario": "drainage",
+        "samples_s": [
+          0.0025735999988683034,
+          0.0028755509993061423,
+          0.00289485000030254
+        ],
+        "median_s": 0.0028755509993061423,
+        "status": "accepted",
+        "length_m": 9.055385138137417,
+        "bends": 0,
+        "expanded": 0
+      },
+      "v2": {
+        "scenario": "drainage",
+        "samples_s": [
+          0.005408371998782968,
+          0.006722341000568122,
+          0.005280287998175481
+        ],
+        "median_s": 0.005408371998782968,
+        "status": "accepted",
+        "length_m": 9.055385138137417,
+        "bends": 0,
+        "expanded": 0
+      },
+      "observed_runtime_ratio": 0.5316851355552503,
+      "same_status_and_route_metrics": true
+    },
+    {
+      "scenario": "impossible",
+      "baseline": {
+        "scenario": "impossible",
+        "samples_s": [
+          1.772537568998814,
+          1.6928000219995738,
+          1.6613074939996295
+        ],
+        "median_s": 1.6928000219995738,
+        "status": "no_route",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 10835
+      },
+      "v2": {
+        "scenario": "impossible",
+        "samples_s": [
+          0.4214352859999053,
+          0.4803702869976405,
+          0.39756861199930427
+        ],
+        "median_s": 0.4214352859999053,
+        "status": "no_route",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 9601
+      },
+      "observed_runtime_ratio": 4.016749613130292,
+      "same_status_and_route_metrics": true
+    },
+    {
+      "scenario": "efficient",
+      "baseline": {
+        "scenario": "efficient",
+        "samples_s": [
+          0.0015099340016604401,
+          0.001491530998464441,
+          0.0022007560000929516
+        ],
+        "median_s": 0.0015099340016604401,
+        "status": "accepted",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 0
+      },
+      "v2": {
+        "scenario": "efficient",
+        "samples_s": [
+          0.0018513309987611137,
+          0.0017219190012838226,
+          0.001610986997548025
+        ],
+        "median_s": 0.0017219190012838226,
+        "status": "accepted",
+        "length_m": 9.0,
+        "bends": 0,
+        "expanded": 0
+      },
+      "observed_runtime_ratio": 0.8768902605376145,
+      "same_status_and_route_metrics": true
+    }
+  ]
+}

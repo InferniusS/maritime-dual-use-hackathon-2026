@@ -1,0 +1,236 @@
+{
+  "scope": "Non-executing binary wheel resolution for CPython 3.12 ARM64 Linux; no board runtime, import or performance test. Artifact digest records downloaded files and is not a substitute for package index integrity verification.",
+  "command": "python -m pip download --disable-pip-version-check --only-binary=:all: --platform manylinux_2_28_aarch64 --platform manylinux_2_27_aarch64 --platform manylinux2014_aarch64 --implementation cp --python-version 312 --abi cp312 -r requirements-edge.txt --dest /tmp/pipeforge-edge-arm64-wheels",
+  "result": "success",
+  "wheel_count": 19,
+  "wheels": [
+    {
+      "filename": "annotated_doc-0.0.5-py3-none-any.whl",
+      "package": "annotated-doc",
+      "version": "0.0.5",
+      "requires_python": ">=3.9",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 5302,
+      "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"
+    },
+    {
+      "filename": "annotated_types-0.8.0-py3-none-any.whl",
+      "package": "annotated-types",
+      "version": "0.8.0",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 13427,
+      "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
+    },
+    {
+      "filename": "anyio-4.15.1-py3-none-any.whl",
+      "package": "anyio",
+      "version": "4.15.1",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 132079,
+      "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101"
+    },
+    {
+      "filename": "certifi-2026.7.22-py3-none-any.whl",
+      "package": "certifi",
+      "version": "2026.7.22",
+      "requires_python": ">=3.7",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 136983,
+      "sha256": "62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775"
+    },
+    {
+      "filename": "click-8.5.0-py3-none-any.whl",
+      "package": "click",
+      "version": "8.5.0",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 125251,
+      "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360"
+    },
+    {
+      "filename": "fastapi-0.143.3-py3-none-any.whl",
+      "package": "fastapi",
+      "version": "0.143.3",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 144849,
+      "sha256": "75e8bd68e2f52f77d29b2879749c257d64de2d85282d25270caf2bfccce5efe5"
+    },
+    {
+      "filename": "h11-0.16.0-py3-none-any.whl",
+      "package": "h11",
+      "version": "0.16.0",
+      "requires_python": ">=3.8",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 37515,
+      "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+    },
+    {
+      "filename": "httpcore-1.0.9-py3-none-any.whl",
+      "package": "httpcore",
+      "version": "1.0.9",
+      "requires_python": ">=3.8",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 78784,
+      "sha256": "2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55"
+    },
+    {
+      "filename": "httpx-0.28.1-py3-none-any.whl",
+      "package": "httpx",
+      "version": "0.28.1",
+      "requires_python": ">=3.8",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 73517,
+      "sha256": "d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad"
+    },
+    {
+      "filename": "idna-3.20-py3-none-any.whl",
+      "package": "idna",
+      "version": "3.20",
+      "requires_python": ">=3.9",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 69583,
+      "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c"
+    },
+    {
+      "filename": "numpy-2.5.4-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+      "package": "numpy",
+      "version": "2.5.4",
+      "requires_python": ">=3.12",
+      "tags": [
+        "cp312-cp312-manylinux_2_27_aarch64",
+        "cp312-cp312-manylinux_2_28_aarch64"
+      ],
+      "bytes": 15695312,
+      "sha256": "fe4d21ab149f15e4e6043dfb0de87e6e5f34ac176cde83060e9802981fca2ac2"
+    },
+    {
+      "filename": "opentelemetry_api-1.45.1-py3-none-any.whl",
+      "package": "opentelemetry-api",
+      "version": "1.45.1",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 60256,
+      "sha256": "b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb"
+    },
+    {
+      "filename": "pydantic-2.14.1-py3-none-any.whl",
+      "package": "pydantic",
+      "version": "2.14.1",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 488106,
+      "sha256": "9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454"
+    },
+    {
+      "filename": "pydantic_core-2.50.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
+      "package": "pydantic_core",
+      "version": "2.50.1",
+      "requires_python": ">=3.10",
+      "tags": [
+        "cp312-cp312-manylinux_2_17_aarch64",
+        "cp312-cp312-manylinux2014_aarch64"
+      ],
+      "bytes": 2048429,
+      "sha256": "c18db21573bd2c6489f9a544b7499f0df2853958c568e5e783536ee1f690af41"
+    },
+    {
+      "filename": "scipy-1.18.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+      "package": "scipy",
+      "version": "1.18.1",
+      "requires_python": ">=3.12",
+      "tags": [
+        "cp312-cp312-manylinux_2_27_aarch64",
+        "cp312-cp312-manylinux_2_28_aarch64"
+      ],
+      "bytes": 34025113,
+      "sha256": "3c085faa2cfa879c5141df483f836f4d691045a078224a670fa570fa01612d89"
+    },
+    {
+      "filename": "starlette-1.8.0-py3-none-any.whl",
+      "package": "starlette",
+      "version": "1.8.0",
+      "requires_python": ">=3.11",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 79612,
+      "sha256": "dfdd6b29c26483288088d990eee59631dedadd66ce20d203402a7ca8e3c4656f"
+    },
+    {
+      "filename": "typing_extensions-4.16.0-py3-none-any.whl",
+      "package": "typing_extensions",
+      "version": "4.16.0",
+      "requires_python": ">=3.9",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 45571,
+      "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+    },
+    {
+      "filename": "typing_inspection-0.4.4-py3-none-any.whl",
+      "package": "typing-inspection",
+      "version": "0.4.4",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 14750,
+      "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147"
+    },
+    {
+      "filename": "uvicorn-0.54.0-py3-none-any.whl",
+      "package": "uvicorn",
+      "version": "0.54.0",
+      "requires_python": ">=3.10",
+      "tags": [
+        "py3-none-any"
+      ],
+      "bytes": 87427,
+      "sha256": "505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf"
+    }
+  ],
+  "legacy_glibc_probe": {
+    "platform": "manylinux2014_aarch64",
+    "python": "cp312",
+    "packages": [
+      "numpy==2.5.4",
+      "scipy==1.18.1"
+    ],
+    "result": "failed at numpy requirement resolution",
+    "reason": "No matching binary distribution for numpy==2.5.4 on manylinux2014_aarch64; dependency resolution stopped before SciPy."
+  },
+  "requirements_summary": {
+    "python": "CPython 3.12, ABI cp312, 64-bit aarch64 Linux",
+    "glibc": "NumPy and SciPy wheel tags support glibc >=2.27; Pydantic-core wheel supports >=2.17. The complete pinned stack therefore requires >=2.27 by wheel tags.",
+    "runtime_tested": false,
+    "qualcomm_device_tested": false
+  }
+}

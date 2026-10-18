@@ -1,0 +1,21 @@
+         1934762 function calls (1910506 primitive calls) in 2.688 seconds
+
+   Ordered by: cumulative time
+   List reduced from 141 to 15 due to restriction <15>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.001    0.001    2.687    2.687 /workspace/maritime-dual-use-hackathon-2026/backend/optimizer.py:97(optimize)
+        1    0.361    0.361    2.672    2.672 /workspace/maritime-dual-use-hackathon-2026/backend/optimizer.py:23(route)
+79554/56500    0.078    0.000    1.753    0.000 {built-in method builtins.min}
+    46060    0.048    0.000    1.706    0.000 /workspace/maritime-dual-use-hackathon-2026/backend/optimizer.py:84(<genexpr>)
+    23109    0.432    0.000    1.665    0.000 /workspace/maritime-dual-use-hackathon-2026/backend/geometry.py:25(segment_distance)
+    69420    0.266    0.000    0.547    0.000 /workspace/maritime-dual-use-hackathon-2026/backend/geometry.py:39(<genexpr>)
+    46779    0.067    0.000    0.511    0.000 /workspace/pipeforge-venv/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:2245(clip)
+    46779    0.077    0.000    0.444    0.000 /workspace/pipeforge-venv/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:48(_wrapfunc)
+    46304    0.104    0.000    0.354    0.000 /workspace/pipeforge-venv/lib/python3.12/site-packages/numpy/_core/fromnumeric.py:38(_wrapit)
+    46463    0.136    0.000    0.271    0.000 /workspace/pipeforge-venv/lib/python3.12/site-packages/numpy/linalg/_linalg.py:2615(norm)
+     3195    0.082    0.000    0.241    0.000 /workspace/maritime-dual-use-hackathon-2026/backend/optimizer.py:29(clear)
+    46304    0.036    0.000    0.201    0.000 {method 'clip' of 'numpy.ndarray' objects}
+    46779    0.167    0.000    0.167    0.000 /workspace/pipeforge-venv/lib/python3.12/site-packages/numpy/_core/_methods.py:96(_clip)
+    92436    0.041    0.000    0.116    0.000 /workspace/maritime-dual-use-hackathon-2026/backend/geometry.py:27(<lambda>)
+   147008    0.092    0.000    0.092    0.000 {built-in method numpy.asarray}

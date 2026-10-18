@@ -1,0 +1,48 @@
+{
+  "schema_version": "pipeforge.share-snapshot/1",
+  "source_commit": "a267421136c32effe103f8d96e2706d632c24126",
+  "source_main_commit": "227a61351f9d5a37a00c15ce457329709a01def9",
+  "history": "Fresh root snapshot; no original repository history copied",
+  "runtime_source_policy": "Application Python, TypeScript, C# and JavaScript preserved byte-for-byte; only drawing-dependent test functions and documentation sanitized",
+  "excluded_paths": [
+    "autocad-plugin/examples/line-test.dxf",
+    "autocad-plugin/prebuilt/Maritime.AutoCAD.dll",
+    "autocad-plugin/prebuilt/build-info.json",
+    "docs/images/current-model.jpg",
+    "examples/real-cad-demo/baseline.json",
+    "examples/real-cad-demo/detour.json",
+    "examples/real-cad-demo/report.html",
+    "examples/real-cad-demo/result.json",
+    "examples/real-cad-demo/route-centerlines.dxf"
+  ],
+  "removed_tests": [
+    "test_controlled_cad_report_shows_true_baseline_and_fixed_sections",
+    "test_shared_cad_demo_reproduces_baseline_and_detour_without_source_files",
+    "test_shared_results_and_cad_export_match_the_reproducible_demo"
+  ],
+  "confidential_assets_included": false,
+  "repository_visibility": "Must be verified before remote publication",
+  "runtime_files_verified_byte_identical": 79,
+  "sanitized_python_tests": {
+    "passed": 971,
+    "deselected": 0
+  },
+  "credential_review": "No actual credentials detected in source-only text audit; synthetic test placeholders retained",
+  "publication_status": "UNPUBLISHED_LOCAL_CANDIDATE_PENDING_REPOSITORY_PRIVACY_VERIFICATION",
+  "sanitized_documentation": [
+    "README.md",
+    "autocad-plugin/README.md",
+    "docs/SHARING.md",
+    "docs/team-handoff.md",
+    "docs/routing-prototype.md",
+    "docs/pipe-shape-milestone.md",
+    "docs/snapdragon-guide.md",
+    "docs/standards-iteration.md",
+    "docs/assumptions.md",
+    "docs/challenge-requirements.md",
+    "docs/cad-workflow.md",
+    "docs/dependencies.md",
+    "docs/edge/V4_0.md",
+    "docs/edge/AUTOCAD_4.md"
+  ]
+}
