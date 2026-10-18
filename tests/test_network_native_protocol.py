@@ -13,6 +13,7 @@ import ezdxf
 import pytest
 
 from pipe_router.connected import network_digest
+from pipe_router.network_model import graph_summary
 from test_autocad import payload_for
 from test_cad_import import cylinder_sat, make_cylinder_dxf
 from test_web import json_request
@@ -194,3 +195,76 @@ def test_native_cancel_requests_engine_stop_and_never_produces_approval(native_w
     assert finished["status"] == "cancelled", finished
     assert finished["response"] is None
     assert not native_workspace["server"].RequestHandlerClass.keywords["workspace"].network.reviews
+
+
+def test_native_forty_source_connected_dxf_preserves_graph_and_reports_actual_progress(tmp_path, native_workspace):
+    """Forty actual source solids, one connected graph, no fabricated improvement."""
+    document = ezdxf.new("R2010")
+    document.header["$INSUNITS"] = 4
+    handles = []
+    for index in range(40):
+        solid = document.modelspace().add_3dsolid(dxfattribs={"layer": "SYNTHETIC-COOLING"})
+        # Explicitly invented OD60 mm straight cylinders of length1000 mm.
+        records = []
+        for line in cylinder_sat(translation=(0, 0, index*1000)):
+            if line.startswith("cone-surface"):
+                line = line.replace(" 2 0 0 1 I I 0 1 2 ", " 30 0 0 1 I I 0 1 30 ")
+            elif line.startswith("ellipse-curve"):
+                line = line.replace(" 0 0 10 ", " 0 0 1000 ").replace(" 2 0 0 1 ", " 30 0 0 1 ")
+            elif line.startswith("point"):
+                line = line.replace(" 2 0 10 ", " 30 0 1000 ").replace(" 2 0 0 ", " 30 0 0 ")
+            records.append(line)
+        solid.sat = records
+        handles.append(solid.dxf.handle)
+    source = tmp_path / "synthetic-forty-pipe-network.dxf"
+    document.saveas(source)
+    original_bytes = source.read_bytes()
+    status, health = json_request(native_workspace, "GET", "/api/health")
+    assert status == 200
+    assert "industrial_network_v51" in health["capabilities"]
+    status, imported = json_request(native_workspace, "POST", "/api/autocad/inspect", payload_for(source, handles))
+    assert status == 200, imported
+    status, inspected = json_request(native_workspace, "POST", "/api/network/inspect", {
+        "cad_id": imported["cad_id"], "selected_handles": handles,
+        "drawing": {"id": "invented-forty-native-model", "revision": "pipeforge-session:industrial:0", "source_units": "mm"},
+        "coordinate_system": {"frame": "WCS"},
+        "bounds": {"min": [-1000,-1000,-1000], "max": [1000,1000,41000]}, "tolerance_mm": 1,
+    })
+    assert status == 200, inspected
+    network = inspected["network"]
+    assert len(network["spans"]) == 40
+    assert {span["cad_handle"] for span in network["spans"]} == set(handles)
+    assert all(span["outer_diameter_mm"] == pytest.approx(60) for span in network["spans"])
+    assert len(network["unresolved_connections"]) == 39
+    # Reviewed, synthetic engineering declarations; layer names alone do not supply semantics.
+    network["systems"] = [{"id": "reviewed-cooling", "type": "pressurized"}]
+    for component in network["nodes"] + network["spans"]:
+        component["system_id"] = "reviewed-cooling"
+    for span in network["spans"]:
+        span.update(system_type="pressurized", nominal_diameter_mm=50)
+        span["fitting_catalog"] = {"status": "provisional", "source": "Invented protocol fixture, no shipyard approval", "radius_mm": 200, "body_radius_mm": 35, "angles_deg": [45,90]}
+    decisions = [{"connection_id": item["id"], "action": "connect"} for item in network["unresolved_connections"]]
+    status, confirmed = json_request(native_workspace, "POST", "/api/network/confirm", {"network": network, "decisions": decisions})
+    assert status == 200, confirmed
+    network = confirmed["network"]
+    topology = graph_summary(network)
+    assert len(topology["components"]) == 1
+    assert len(network["nodes"]) == 41
+    assert len(network["connection_decisions"]) == 39
+    selected = [span["id"] for span in network["spans"]]
+    status, job = json_request(native_workspace, "POST", "/api/network/jobs", {
+        "network": network, "selected_span_ids": selected, "strategy": "balanced", "max_evaluations": 1, "max_seconds": 10,
+    })
+    assert status == 200, job
+    finished = _wait_native_job(native_workspace, job["id"])
+    assert finished["status"] == "complete", finished
+    result = finished["response"]["result"]
+    assert result["selection"]["modifiable_span_ids"] == sorted(selected)
+    assert len(result["original_network"]["spans"]) == 40
+    assert len(result["topology"]["components"]) == 1
+    assert "at most 16 modifiable spans" not in result["explanation"]
+    progress = finished["progress"]
+    assert progress["selected_span_count"] == 40
+    assert progress["evaluations"] == result["search"]["evaluations"]
+    assert progress["completed_neighborhoods"] <= progress["total_neighborhoods"]
+    assert source.read_bytes() == original_bytes

@@ -48,7 +48,7 @@ The plugin and companion use the service on `http://127.0.0.1:8767` on the same 
 2. Enter `NETLOAD` and select the newly built DLL from `bin/Release/net10.0-windows`.
 3. Run `MARITIMEPREVIEW` on a simple line. Confirm a temporary overlay appears and clears.
 4. Use `MARITIMEOPTIMIZE` with a synthetic line/polyline route and a synthetic obstacle box. Inspect the original/proposed comparison. Saving a suggestion adds a separate review centerline; it does not replace the source assembly.
-5. Follow the [5.0 native workflow and acceptance checklist](../docs/edge/AUTOCAD_5.md) before using new commands on authorized project data. The earlier [4.0 checklist](../docs/edge/AUTOCAD_4.md) remains applicable to the existing handoff and review commands.
+5. Follow the [5.1 industrial-network workflow](../docs/edge/AUTOCAD_5_1.md) and [native acceptance checklist](../docs/edge/AUTOCAD_5.md) before using commands on authorized project data.
 
 Use a trusted project folder while retaining normal AutoCAD security controls. Restart AutoCAD before loading a rebuilt assembly if an earlier version is already loaded.
 

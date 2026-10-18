@@ -100,14 +100,14 @@ def _planarity(points):
     return max(abs(sum((point[i] - origin[i]) * normal[i] for i in range(3))) for point in points)
 
 
-def _physical_path(span):
+def _physical_path(span, fitting_assessment=None):
     """Develop a sampled physical bend path with analytic station lengths.
 
     Each primitive preserves its exact length. Coordinates on arcs are computed
     from their actual circle, rather than cutting corners with straight chords.
     """
     from .network_fittings import fitting_envelopes
-    assessment = fitting_envelopes(span)
+    assessment = fitting_envelopes(span) if fitting_assessment is None else fitting_assessment
     points = span["points"]
     by_vertex = {fitting["vertex_index"]: fitting for fitting in assessment["fittings"]}
     primitives, cursor = [], list(points[0])
@@ -326,7 +326,7 @@ def _locate_station(primitives, point):
     return candidates[0] if len(candidates) == 1 else None
 
 
-def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
+def manufacture_network(network: dict[str, Any], *, _fitting_assessments=None) -> dict[str, Any]:
     """Plan/evaluate pieces independently for each span without modifying input."""
     if network.get("units") != "mm":
         raise ValueError("Manufacturing requires normalized millimetre geometry")
@@ -344,7 +344,7 @@ def manufacture_network(network: dict[str, Any]) -> dict[str, Any]:
             _budget_error(f"network exceeds {MAX_MANUFACTURING_PIECES} pieces")
         if not existing and len(_angles(span["points"])) > limits["max_bends"]*piece_budget:
             _budget_error(f"bend count requires more than {piece_budget} pieces")
-        primitives, fitting_result, physical_known = _physical_path(span)
+        primitives, fitting_result, physical_known = _physical_path(span,(_fitting_assessments or {}).get(span_id))
         impossible_fittings=[issue for issue in fitting_result["issues"] if not issue["code"].startswith("missing_")]
         missing_fittings=[issue for issue in fitting_result["issues"] if issue["code"].startswith("missing_")]
         checks.append(_check("manufacturing.fitting_geometry",

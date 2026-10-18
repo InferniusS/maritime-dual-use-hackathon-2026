@@ -30,7 +30,7 @@
   "credential_review": "No actual credentials detected in source-only text audit; synthetic test placeholders retained",
   "publication_status": "Initial sanitized root 22ad50e published to private collaboration branch pipeforge-edge-v4",
   "update_policy": "Normal fast-forward commits and pushes only to pipeforge-edge-v4 after confidentiality and repository checks; never modify main or import its unsanitized ancestry",
-  "current_engineering_record": "docs/edge/V5_0.md",
+  "current_engineering_record": "docs/edge/V5_1.md",
   "sanitized_documentation": [
     "README.md",
     "autocad-plugin/README.md",

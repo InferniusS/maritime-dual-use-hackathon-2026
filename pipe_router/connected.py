@@ -25,7 +25,8 @@ _CACHE_LOCK = threading.Lock()
 CACHE_LIMIT = 128
 CACHE_BYTES_LIMIT = 16 * 1024 * 1024
 MAX_EVALUATIONS = 64
-MAX_SEARCH_SPANS = 16
+MAX_SEARCH_SPANS = 128
+MAX_LOCAL_SPANS = 16
 MAX_SECONDS = 120.
 DEFAULT_SECONDS = 30.
 
@@ -67,11 +68,8 @@ def _neighbor_obstacle(other, span, network):
     for nodeid in common:
         # Explicit locally bounded port contact only. Remote parts of incident
         # spans remain active obstacles, including folds back toward the route.
-        radius = (other["outer_diameter_mm"]+span["outer_diameter_mm"])/2. + float(requirement("clearance.shock")["value"])
-        declared = nodes[nodeid].get("constraints", {}).get("contact_radius_mm")
-        body = nodes[nodeid].get("dimensions",{}).get("body_radius_mm")
-        if declared is not None and body is not None and 0 < declared <= min(1000,body+radius):
-            radius = max(radius,declared)
+        from .network_components import connection_contact_radius
+        radius = connection_contact_radius(nodes[nodeid], other, span, float(requirement("clearance.shock")["value"]), include_fitting_allowance=True)
         contacts.append((nodes[nodeid]["position"], radius))
         if radius > 0:
             reverse = other["to_node"] == nodeid
@@ -113,26 +111,25 @@ def _system_type(network, span):
     return value if value in ("pressurized", "gravity", "drainage", "vent") else None
 
 
-def _solve_span(network, span, cancelled, *, released_ids=(), bend_penalty=150.):
+def _solve_span(network, span, cancelled, *, released_ids=(), bend_penalty=150., industrial_context=None):
+    if industrial_context and industrial_context.can_preserve_straight(network, span):
+        return deepcopy(span["points"]), {"legs":[{"expanded_states":0,"grid_nodes":0}],
+                "reason":"Retained independently checked straight run; no changed finite neighboring envelope intersects its conservative influence bounds",
+                "incremental_reuse":True}, False
     obstacles = deepcopy(network["obstacles"])
     for other in network["spans"]:
         if other["id"] != span["id"] and other["id"] not in released_ids:
-            item = _neighbor_obstacle(other, span, network)
+            item = industrial_context.cached_obstacle(other, span, network, _neighbor_obstacle) if industrial_context else _neighbor_obstacle(other, span, network)
             if item:
                 obstacles.append(item)
-    for node in network["nodes"]:
-        if node["type"] not in ("valve", "tee", "junction", "fitting") or node["id"] in (span["from_node"], span["to_node"]):
+    from .network_components import component_geometry
+    from .industrial_search import component_obstacles
+    for component in component_geometry(network):
+        if component["min"] is None or component["id"] in (span["from_node"], span["to_node"]):
             continue
-        radii = [node.get("dimensions", {}).get("body_radius_mm"), (node.get("fitting_catalog") or {}).get("body_radius_mm")]
-        known = [r for r in radii if isinstance(r, (int, float)) and not isinstance(r, bool) and math.isfinite(r) and r > 0]
-        if not known:
-            continue
-        radius, center = max(known), node["position"]
-        obstacles.append({"id": f"network-node:{node['id']}", "min": [p-radius for p in center], "max": [p+radius for p in center],
-                          "capsules": [{"start": list(center), "end": list(center), "radius": radius}],
-                          "geometry_note": "Explicit finite nonincident component body; missing component dimensions are not inferred"})
+        obstacles.extend(component_obstacles(component, span, float(requirement("clearance.shock")["value"])))
     from .core import MAX_OBSTACLES
-    if len(obstacles) > MAX_OBSTACLES:
+    if len(obstacles) > MAX_OBSTACLES and industrial_context is None:
         return None, {"reason": "Combined supplied environment, pipe and component envelopes exceed the bounded router obstacle budget; select a smaller affected environment", "bounded_search": True, "obstacle_count": len(obstacles), "max_obstacles": MAX_OBSTACLES}, False
     clearance = float(requirement("clearance.shock")["value"])
     # Extra fitting body allowance helps the route search find buildable
@@ -193,30 +190,55 @@ def _solve_span(network, span, cancelled, *, released_ids=(), bend_penalty=150.)
         waypoints.append(center)
     # Cache exact geometry and metadata of this local solve; altered neighbor
     # routes, drawing revisions or rules generate a different key.
-    cache_key = hashlib.sha256(json.dumps([network["drawing"],network["standards_profile"],catalog,layout,waypoints],sort_keys=True,allow_nan=False).encode()).hexdigest()
+    cache_key = hashlib.sha256(json.dumps([network["drawing"],network["standards_profile"],catalog,layout,waypoints,bool(industrial_context)],sort_keys=True,allow_nan=False).encode()).hexdigest()
     with _CACHE_LOCK:
         cached = _CACHE.get(cache_key)
         if cached:
             _CACHE.move_to_end(cache_key)
             return deepcopy(cached[0]),deepcopy(cached[1]),True
-    combined = []
-    searches = []
+    combined, searches, stage_summaries = [], [], []
     anchors = [layout["pipe"]["start"],*waypoints,layout["pipe"]["end"]]
-    for a,b in zip(anchors,anchors[1:]):
-        if cancelled and cancelled():
-            return None,{"reason":"Cancelled between bounded span searches"},False
-        leg = deepcopy(layout)
-        leg["pipe"].update({"start":a,"end":b,"original_route":[a,b]})
-        try:
-            with cancellation_scope(cancelled):
-                output = run_workflow(leg)
-        except (ValueError, RuntimeError) as error:
-            return None,{"reason":str(error),"bounded_search":True},False
-        searches.append(output["search"])
-        candidate = output.get("candidate")
-        if not candidate:
-            return None,{"legs":searches,"reason":"Bounded search found no acceptable span route"},False
-        combined.extend(candidate["points"] if not combined else candidate["points"][1:])
+    if industrial_context:
+        from .industrial_search import spatial_search_stages
+        stages = spatial_search_stages(layout, waypoints)
+    else:
+        stages = [(layout, None)]
+    for stage_layout, stage_summary in stages:
+        if stage_summary:
+            stage_summaries.append(stage_summary)
+        if len(stage_layout["obstacles"]) > MAX_OBSTACLES:
+            searches.append({"reason": "Local environment exceeds the bounded router obstacle budget", "obstacle_count": len(stage_layout["obstacles"]), "max_obstacles": MAX_OBSTACLES, "expanded_states": 0, "grid_nodes": 0})
+            continue
+        stage_points = []
+        for a,b in zip(anchors,anchors[1:]):
+            if cancelled and cancelled():
+                return None,{"legs":searches,"stages":stage_summaries,"reason":"Cancelled or time budget reached between bounded span searches"},False
+            leg = deepcopy(stage_layout)
+            leg["pipe"].update({"start":a,"end":b,"original_route":[a,b]})
+            try:
+                with cancellation_scope(cancelled):
+                    if industrial_context and not gravity:
+                        from .workflow import validate_layout_route
+                        direct = validate_layout_route(leg, [a,b])
+                    else:
+                        direct = None
+                    if direct and direct["valid"]:
+                        output = {"candidate":{"points":[a,b]}, "search":{"expanded_states":0,"grid_nodes":0,"method":"continuously checked direct leg", "reason":"Straight fixed-endpoint leg is already the geometric length lower bound within supplied local obstacles"}}
+                    else:
+                        output = run_workflow(leg)
+            except (ValueError, RuntimeError) as error:
+                searches.append({"reason":str(error),"bounded_search":True,"expanded_states":0,"grid_nodes":0})
+                break
+            searches.append(output["search"])
+            candidate = output.get("candidate")
+            if not candidate:
+                break
+            stage_points.extend(candidate["points"] if not stage_points else candidate["points"][1:])
+        else:
+            combined = stage_points
+            break
+    if not combined:
+        return None,{"legs":searches,"stages":stage_summaries,"reason":"Bounded spatial and resolution stages found no acceptable span route"},False
     if axes:
         combined = [[sum(p[i]*axes[i][j] for i in range(3)) for j in range(3)] for p in combined]
     if reverse:
@@ -224,6 +246,8 @@ def _solve_span(network, span, cancelled, *, released_ids=(), bend_penalty=150.)
     # Keep source endpoints bit-for-bit to avoid numerical WCS roundoff.
     combined[0],combined[-1] = deepcopy(span["points"][0]),deepcopy(span["points"][-1])
     explanation = {"legs":searches,"reason":"Existing bounded router solved all mandatory legs"}
+    if stage_summaries:
+        explanation["stages"] = stage_summaries
     with _CACHE_LOCK:
         weight = len(json.dumps([combined,explanation],allow_nan=False).encode())
         if weight <= CACHE_BYTES_LIMIT // 4:
@@ -349,12 +373,14 @@ def _local_bend_penalty(config, before, span):
 
 
 def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, objective_weights=None,
-                     max_seconds=None, selected_span_ids=None, selected_system_ids=None):
-    from .network_validation import validate_network
+                     max_seconds=None, selected_span_ids=None, selected_system_ids=None, progress=None):
+    from .network_validation import validate_network, validation_delta
     from .network_fittings import fitting_envelopes
     started = time.perf_counter()
     if isinstance(max_evaluations, bool) or not isinstance(max_evaluations, int) or not 1 <= max_evaluations <= MAX_EVALUATIONS:
         raise ValueError("max_evaluations must be an integer from 1 to 64")
+    if progress is not None and not callable(progress):
+        raise ValueError("progress must be a callable receiving a progress record")
     network = normalize_network(raw)
     settings = network.get("search", {})
     config = resolve_objective(strategy if strategy is not None else settings.get("strategy"), objective_weights if objective_weights is not None else settings.get("objective_weights"))
@@ -365,13 +391,44 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
     selected = set(selection["modifiable_span_ids"])
     modifiable = [s["id"] for s in network["spans"] if s["id"] in selected]
     digest = network_digest(network)
+    progress_errors = 0
+    def initial_progress():
+        nonlocal progress_errors
+        if progress:
+            try:
+                progress({"phase":"initial_validation", "evaluations":0, "max_evaluations":max_evaluations,
+                          "selected_span_count":len(modifiable), "completed_neighborhoods":0, "total_neighborhoods":0,
+                          "neighborhood_index":0, "active_span_ids":[], "elapsed_seconds":time.perf_counter()-started})
+            except Exception:
+                progress_errors += 1
+    initial_progress()
     original_validation = validate_network(network, reference=network, permitted_span_ids=selected)
     score_options = {"strategy": config["strategy"], "objective_weights": config["weights"]}
     before = metrics(network, reference=network, validation=original_validation, **score_options)
     best, best_validation, after = None, original_validation, before
     attempts, evaluations, cache_hits = [], 0, 0
+    expanded_states = grid_nodes_peak = local_solves = 0
+    evaluation_limit_reached = search_completed = False
+    active_order = []
+    controller = None
+    if len(modifiable) > MAX_LOCAL_SPANS:
+        from .industrial_search import NeighborhoodSearch
+        controller = NeighborhoodSearch(network, modifiable, original_validation, before)
     was_cancelled, timed_out = False, False
     deadline = started + seconds
+    def emit(phase):
+        nonlocal progress_errors
+        if progress:
+            try:
+                progress({"phase":phase, "evaluations":evaluations, "max_evaluations":max_evaluations,
+                          "selected_span_count":len(modifiable), "completed_neighborhoods":controller.completed_neighborhoods if controller else int(search_completed),
+                          "total_neighborhoods":controller.total_neighborhoods if controller else 1,
+                          "neighborhood_index":controller.active_index if controller else int(bool(active_order)),
+                          "active_span_ids":list(active_order), "expanded_states":expanded_states, "grid_nodes_peak":grid_nodes_peak,
+                          "local_solves":local_solves, "elapsed_seconds":time.perf_counter()-started})
+            except Exception:
+                # UI reporting cannot change an engineering acceptance decision.
+                progress_errors += 1
     def interrupted():
         nonlocal was_cancelled, timed_out
         if cancelled and cancelled():
@@ -383,9 +440,6 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
     if any(not _system_type(network, s) for s in network["spans"] if s["id"] in selected):
         blocked = True
         attempts.append({"reason": "Confirm every affected span's system type before routing"})
-    if len(modifiable) > MAX_SEARCH_SPANS:
-        blocked = True
-        attempts.append({"reason": "Select an affected subnetwork with at most 16 modifiable spans; entire supplied network is still validated"})
     if blocked:
         attempts.append({"reason": "Unresolved connections or search budget prevent safe network modification"})
     else:
@@ -394,13 +448,22 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
         # a bounded extra sweep; this can release space that was occupied by an
         # earlier candidate. No intermediate route is accepted independently.
         def all_plans():
-            yield from plans
-            if best is not None and len(modifiable) > 1:
-                for order in _routing_orders(best, modifiable)[:2]:
-                    yield best, None, order, "incumbent_reroute"
-        for variant, moved_node, order, mode in all_plans():
-            if evaluations >= max_evaluations or interrupted():
+            if controller:
+                yield from controller.plans(_routing_orders)
+            else:
+                for variant, moved_node, order, mode in plans:
+                    yield variant, moved_node, order, mode, None
+                if best is not None and len(modifiable) > 1:
+                    for order in _routing_orders(best, modifiable)[:2]:
+                        yield best, None, order, "incumbent_reroute", None
+        for variant, moved_node, order, mode, neighborhood in all_plans():
+            if evaluations >= max_evaluations:
+                evaluation_limit_reached = True
                 break
+            if interrupted():
+                break
+            active_order = list(order)
+            emit("neighborhood_search" if controller else "coordinated_search")
             candidate = deepcopy(variant)
             solves = []
             for index, spanid in enumerate(order):
@@ -409,14 +472,25 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
                 span = next(s for s in candidate["spans"] if s["id"] == spanid)
                 bend_penalty = _local_bend_penalty(config, before, span)
                 released = set(order[index+1:]) if mode == "prioritized_reservations" else set()
-                points, search, hit = _solve_span(candidate, span, interrupted, released_ids=released, bend_penalty=bend_penalty)
+                solve_options = {"released_ids":released, "bend_penalty":bend_penalty}
+                if controller:
+                    solve_options["industrial_context"] = controller
+                points, search, hit = _solve_span(candidate, span, interrupted, **solve_options)
                 cache_hits += int(hit)
+                local_solves += 1
+                if not hit:
+                    expanded_states += sum(leg.get("expanded_states", 0) for leg in search.get("legs", []))
+                grid_nodes_peak = max([grid_nodes_peak, *[leg.get("grid_nodes", 0) for leg in search.get("legs", [])]])
                 solves.append({"span_id": spanid, "cache_hit": hit, "released_unplanned_span_ids": sorted(released), **search})
                 if points:
                     span["points"] = points
+                emit("span_search_complete")
             if interrupted():
                 break
             evaluations += 1
+            if neighborhood:
+                neighborhood["evaluations"] += 1
+            emit("independent_validation")
             try:
                 validation = validate_network(candidate, reference=network, permitted_span_ids=selected)
             except ValueError as error:
@@ -431,15 +505,23 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
             uncovered_size = any(_bends(span["points"]) and bend_requirement(span.get("nominal_diameter_mm")) is None for span in changed)
             improvement = bool(changed) and (original_validation["hard_failures"] > 0 or score["objective"] < before["objective"]-1e-9)
             accept = failures == 0 and not missing_physical and not uncovered_size and improvement and (best is None or score["objective"] < after["objective"]-1e-9)
+            retained_repair = controller.observe(candidate, validation, score, not missing_physical and not uncovered_size) if controller else False
             candidate_digest = network_digest(candidate)
             attempts.append({"evaluation": evaluations, "moved_node_id": moved_node, "order": list(order), "reservation_mode": mode,
                              "objective": score["objective"], "metrics": score, "candidate_digest": candidate_digest,
                              "changed_span_ids": [s["id"] for s in changed], "hard_failures": failures,
                              "missing_physical_fitting_geometry": missing_physical, "uncovered_nominal_size": bool(uncovered_size),
                              "accepted": accept, "selected": False, "span_searches": solves})
+            if neighborhood:
+                attempts[-1].update({"neighborhood_index":neighborhood["index"], "neighborhood_span_ids":list(neighborhood["span_ids"]),
+                                     "neighborhood_phase":neighborhood["phase"], "internal_repair_retained":retained_repair,
+                                     "internal_repair_hard_failures":controller.validation["hard_failures"]})
             if accept:
                 best, best_validation, after = candidate, validation, score
-    status = "CANCELLED" if was_cancelled else "IMPROVED" if best else "NO IMPROVEMENT FOUND" if original_validation["hard_failures"] == 0 and not blocked else "NO FEASIBLE ROUTE FOUND"
+        else:
+            search_completed = True
+    termination = "CANCELLED" if was_cancelled else "TIME_BUDGET" if timed_out else "EVALUATION_LIMIT" if evaluation_limit_reached else "BLOCKED_METADATA" if blocked else "BOUNDED_SEARCH_COMPLETED"
+    status = "CANCELLED" if was_cancelled else "IMPROVED" if best else "TIME BUDGET EXCEEDED" if timed_out else "SEARCH LIMIT REACHED" if evaluation_limit_reached else "NO IMPROVEMENT FOUND" if original_validation["hard_failures"] == 0 and not blocked else "NO FEASIBLE ROUTE FOUND"
     if was_cancelled:
         best, best_validation, after = None, original_validation, before
     best_digest = network_digest(best) if best else None
@@ -454,17 +536,30 @@ def optimize_network(raw, *, max_evaluations=24, cancelled=None, strategy=None, 
         reason += "; the search time budget was reached"
     if before["unverified_objective_terms"]:
         reason += "; unavailable objective evidence was excluded explicitly: " + ", ".join(before["unverified_objective_terms"])
+    emit("cancelled" if was_cancelled else "complete")
     return {"schema_version": "pipeforge.proposal/4.0", "status": status, "proposal_id": hashlib.sha256((digest+json.dumps(best, sort_keys=True)).encode()).hexdigest()[:24],
             "source_digest": digest, "source_revision": network["drawing"]["revision"], "source_drawing_id": network["drawing"]["id"],
             "original_network": network, "proposed_network": best, "before": before, "after": after,
             "original_validation": original_validation, "validation": best_validation, "changed_span_ids": changed,
+            "validation_delta":validation_delta(original_validation, best_validation),
             "strategy": config["strategy"], "objective_config": config, "selection": selection, "optimization_quality": quality,
             "topology": graph_summary(best or network), "unresolved_issues": notes,
             "release_status": "REVIEW REQUIRED" if best_validation.get("unverified", 0) or best_validation["hard_failures"] else "DESIGNER REVIEW REQUIRED",
             "explanation": reason,
             "search": {"evaluations": evaluations, "max_evaluations": max_evaluations, "max_seconds": float(seconds), "time_budget_reached": timed_out,
-                       "evaluation_budget_reached": evaluations >= max_evaluations, "max_modifiable_spans": MAX_SEARCH_SPANS,
+                       "evaluation_budget_reached": evaluation_limit_reached, "max_modifiable_spans": MAX_SEARCH_SPANS,
+                       "termination_reason":termination, "bounded_search_completed":search_completed,
+                       "max_neighborhood_spans":MAX_LOCAL_SPANS, "selected_span_count":len(modifiable),
+                       "expanded_states":expanded_states, "grid_nodes_peak":grid_nodes_peak, "local_solves":local_solves,
+                       "completed_neighborhoods":controller.completed_neighborhoods if controller else int(search_completed),
+                       "total_neighborhoods":controller.total_neighborhoods if controller else 1,
+                       "neighborhoods":controller.neighborhoods if controller else [],
+                       "interaction_graph":controller.graph_summary if controller else None,
+                       "internal_repair_updates":controller.accepted_repairs if controller else 0,
+                       "geometry_cache_hits":controller.geometry_cache_hits if controller else 0,
+                       "geometry_cache_bytes":controller.geometry_cache_bytes if controller else 0,
+                       "progress_delivery_errors":progress_errors,
                        "cache_hits": cache_hits, "cache_capacity": CACHE_LIMIT, "cache_bytes_limit": CACHE_BYTES_LIMIT,
                        "elapsed_seconds": time.perf_counter()-started, "attempts": attempts, "cancelled": was_cancelled,
-                       "method": "Prioritized multi-system routing with bounded order exploration, temporary release of unplanned permitted runs, incumbent rerouting and independent whole-network acceptance",
+                       "method": "Topology/spatial large-neighborhood coordinated repair with local multiresolution routing and independent complete-network acceptance" if controller else "Prioritized multi-system routing with bounded order exploration, temporary release of unplanned permitted runs, incumbent rerouting and independent whole-network acceptance",
                        "limitations": ["Bounded search is not a proof of global optimality or continuous infeasibility", "Valve moves sample declared allowed positions or permitted-space center", "No source CAD entities are modified", "Time limits are cooperative; independent validation is completed before any candidate is accepted", "Hydraulic loss estimates require supplied fluid, flow, inner diameter, roughness and bend-loss evidence; no flow-distribution solve is performed"]}}

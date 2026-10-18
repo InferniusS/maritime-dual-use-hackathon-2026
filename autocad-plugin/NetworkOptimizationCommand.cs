@@ -45,8 +45,8 @@ public sealed partial class PreviewCommand
             CheckService(client);
             var health = SendServiceJson(client, HttpMethod.Get, "/api/health");
             if (health["capabilities"] is not JsonArray capabilities
-                || !capabilities.Any(value => value?.GetValue<string>() == "network_optimization_v5"))
-                throw new InvalidOperationException("Update and restart the Python service. This command requires network_optimization_v5 so selection and optimization settings cannot be silently ignored.");
+                || !capabilities.Any(value => value?.GetValue<string>() == "industrial_network_v51"))
+                throw new InvalidOperationException("Update and restart the Python service. This command requires industrial_network_v51 for bounded industrial-network routing and measured progress.");
             editor.WriteMessage($"\nSubmitting {selected.Length} selected spans for coordinated optimization; fixed/preserved spans remain protected and the entire declared network remains in validation. Strategy: {strategy}. Source geometry is read-only.");
             var job = PostJson(client, "/api/network/jobs", new
             {
@@ -240,7 +240,7 @@ public sealed partial class PreviewCommand
             this.client = client;
             this.identifier = identifier;
             Text = "PipeForge coordinated network calculation";
-            Width = 530; Height = 180; MinimizeBox = false; MaximizeBox = false;
+            Width = 730; Height = 310; MinimizeBox = false; MaximizeBox = false;
             FormBorderStyle = Forms.FormBorderStyle.FixedDialog;
             StartPosition = Forms.FormStartPosition.CenterParent;
             status.Text = "Queued locally. No source geometry will be changed.";
@@ -282,12 +282,17 @@ public sealed partial class PreviewCommand
             {
                 var job = await Request(HttpMethod.Get, $"/api/network/jobs/{identifier}");
                 var state = job["status"]?.GetValue<string>();
-                if (state == "complete") Finish(cancelRequested ? null : job["response"] as JsonObject, null);
+                if (state == "complete")
+                {
+                    if (!cancelRequested && job["response"] is not JsonObject)
+                        throw new InvalidOperationException("The completed calculation has no result.");
+                    Finish(cancelRequested ? null : job["response"] as JsonObject, null);
+                }
                 else if (state == "cancelled") Finish(null, null);
                 else if (state == "failed") Finish(null, job["error"]?.GetValue<string>() ?? "Network calculation failed.");
                 else if (state is "queued" or "running")
                 {
-                    if (!cancelRequested) status.Text = $"{state}: {(DateTime.UtcNow - started).TotalSeconds:0.0} s elapsed.\nEvaluating shared space and independently validating candidates.\nNo percentage estimate is fabricated.";
+                    if (!cancelRequested) status.Text = NetworkProgressStatus.Format(job, (DateTime.UtcNow - started).TotalSeconds);
                     if ((DateTime.UtcNow - started).TotalSeconds > 150) await RequestCancel();
                 }
                 else throw new InvalidOperationException("Unknown network job state.");

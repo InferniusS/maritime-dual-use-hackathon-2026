@@ -5,7 +5,46 @@ Catalog dimensions are not inferred from nominal pipe size. These are conservati
 occupancy envelopes, not commercial fitting solids or fabrication approval.
 """
 from __future__ import annotations
+from collections import OrderedDict
+from copy import deepcopy
+import hashlib
+import json
 import math
+import sys
+import threading
+
+MAX_FITTING_CACHE_ENTRIES = 256
+MAX_FITTING_CACHE_BYTES = 2_000_000
+_CACHE = OrderedDict()
+_CACHE_LOCK = threading.Lock()
+_CACHE_BYTES = 0
+_CACHE_HITS = 0
+_CACHE_MISSES = 0
+
+
+def clear_geometry_cache():
+    global _CACHE_BYTES, _CACHE_HITS, _CACHE_MISSES
+    with _CACHE_LOCK:
+        _CACHE.clear(); _CACHE_BYTES = _CACHE_HITS = _CACHE_MISSES = 0
+
+
+def geometry_cache_stats():
+    with _CACHE_LOCK:
+        return {"entries":len(_CACHE),"retained_bytes":_CACHE_BYTES,"hits":_CACHE_HITS,"misses":_CACHE_MISSES,
+                "max_entries":MAX_FITTING_CACHE_ENTRIES,"max_retained_bytes":MAX_FITTING_CACHE_BYTES,
+                "scope":"Physical elbow geometry only; no engineering validation results are cached"}
+
+
+def _retained_size(value, limit):
+    seen, pending, size=set(),[value],0
+    while pending:
+        item=pending.pop()
+        if id(item) in seen:continue
+        seen.add(id(item));size+=sys.getsizeof(item)
+        if size>limit:return size
+        if isinstance(item,dict):pending.extend(item.keys());pending.extend(item.values())
+        elif isinstance(item,(list,tuple)):pending.extend(item)
+    return size
 
 
 def _sub(a, b): return [x-y for x, y in zip(a, b)]
@@ -20,7 +59,7 @@ def corner_angle(a, b, c):
     return math.degrees(math.acos(max(-1, min(1, _dot(u, v)/lengths)))) if lengths else 0.0
 
 
-def fitting_envelopes(span):
+def _fitting_envelopes(span):
     """Extract catalog tangent elbows, swept occupancy, and tangent deficiencies.
 
     Missing radius leaves the fitting envelope unknown; it is never replaced by
@@ -88,13 +127,35 @@ def fitting_envelopes(span):
     return {"fittings":fittings,"issues":issues,"straight_lengths":straights,"catalog_verified":catalog_verified}
 
 
-def span_occupied_segments(span):
+def fitting_envelopes(span):
+    """Return isolated geometry from a bounded, physical-input-keyed cache."""
+    global _CACHE_BYTES, _CACHE_HITS, _CACHE_MISSES
+    physical={key:span.get(key) for key in ("id","points","outer_diameter_mm","fitting_catalog")}
+    key=hashlib.sha256(json.dumps(physical,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).digest()
+    with _CACHE_LOCK:
+        entry=_CACHE.get(key)
+        if entry is not None:
+            _CACHE.move_to_end(key);_CACHE_HITS+=1
+            return deepcopy(entry[0])
+        _CACHE_MISSES+=1
+    result=_fitting_envelopes(span)
+    size=_retained_size((key,result),MAX_FITTING_CACHE_BYTES)+256
+    if size<=MAX_FITTING_CACHE_BYTES:
+        with _CACHE_LOCK:
+            if key not in _CACHE:
+                while _CACHE and (len(_CACHE)>=MAX_FITTING_CACHE_ENTRIES or _CACHE_BYTES+size>MAX_FITTING_CACHE_BYTES):
+                    _,(_,old_size)=_CACHE.popitem(last=False);_CACHE_BYTES-=old_size
+                _CACHE[key]=(deepcopy(result),size);_CACHE_BYTES+=size
+    return result
+
+
+def span_occupied_segments(span, data=None):
     """Capsules for trimmed pipe straights and physical fitting sweeps.
 
     If fitting inputs are absent, retain the full original centerline occupancy
     and let independent validation report the missing envelope explicitly.
     """
-    data = fitting_envelopes(span)
+    data = fitting_envelopes(span) if data is None else data
     fittings = {item["vertex_index"]:item for item in data["fittings"]}
     invalid = any(issue["code"] in {"insufficient_tangent_length","reversal"} for issue in data["issues"])
     result = []

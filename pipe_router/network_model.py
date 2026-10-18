@@ -22,7 +22,17 @@ MAX_SPANS = 128
 MAX_POINTS = 4096
 MAX_OBSTACLES = 128
 MAX_CAPSULES = 4096
-NODE_TYPES = {"equipment_port", "valve", "tee", "junction", "fitting", "endpoint", "system_boundary"}
+NODE_TYPES = {"equipment_port", "valve", "tee", "junction", "fitting", "endpoint", "system_boundary",
+              "flange", "reducer", "elbow", "support"}
+MAX_COMPONENT_CAPSULES = 2048
+MAX_PHYSICAL_DIMENSION_MM = 1e9
+
+
+def _physical_dimension(value, label):
+    number = core._number(value, label, positive=True)
+    if number > MAX_PHYSICAL_DIMENSION_MM:
+        raise ValueError(f"{label} exceeds the 1e9 mm physical geometry limit")
+    return number
 
 
 def _identifier(value, label):
@@ -45,7 +55,7 @@ def _normalize_catalog(record, label):
         raise ValueError("Catalog source must be a nonempty reference string")
     for key in ("radius_mm", "body_radius_mm"):
         if catalog.get(key) is not None:
-            catalog[key] = core._number(catalog[key], key, positive=True)
+            catalog[key] = _physical_dimension(catalog[key], key)
     angles = catalog.get("angles_deg", [])
     if not isinstance(angles, list) or len(angles) > 72 or any(not 0 < core._number(a, "catalog angle") < 180 for a in angles):
         raise ValueError("Catalog angles must be positive turns below 180 degrees")
@@ -76,6 +86,10 @@ envelopes use ``units``. Missing engineering metadata remains missing.
         raise ValueError("Unsupported network schema_version")
     net["schema_version"] = SCHEMA
     _identifier(net.get("id"), "network.id")
+    if "analysis_session_id" in net:
+        session = net["analysis_session_id"]
+        if not isinstance(session, str) or len(session) != 32 or any(char not in "0123456789abcdef" for char in session):
+            raise ValueError("analysis_session_id must be an opaque 32-character lowercase hexadecimal identifier")
     units = net.get("units")
     if units not in ("mm", "m", "in"):
         raise ValueError("Network units must be explicitly mm, m, or in")
@@ -110,9 +124,45 @@ envelopes use ``units``. Missing engineering metadata remains missing.
         for key, value in record.items():
             if key.endswith("_mm") and value is not None:
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    core._number(value, f"{label}.{key}", positive=True)
+                    _physical_dimension(value, f"{label}.{key}")
                 elif not isinstance(value, (list, dict)):
                     raise ValueError(f"{label}.{key} must be a positive dimension")
+
+    component_capsules = 0
+    def physical_envelope(record, label):
+        """Normalize declared finite component geometry, not inferred metadata."""
+        nonlocal component_capsules
+        envelope = core._mapping(record, label)
+        if envelope.get("representation") not in ("aabb", "capsules"):
+            raise ValueError("Physical envelope representation must be aabb or capsules")
+        if "conservative" in envelope and not isinstance(envelope["conservative"], bool):
+            raise ValueError("Envelope conservative must be boolean")
+        if "source" in envelope and (not isinstance(envelope["source"], str) or not envelope["source"].strip() or len(envelope["source"]) > 2048):
+            raise ValueError("Physical envelope source must be a nonempty reference")
+        if "anchor" in envelope:
+            envelope["anchor"] = point(envelope["anchor"], label + ".anchor")
+        if envelope["representation"] == "aabb":
+            box(envelope, label)
+        else:
+            capsules = _records(envelope.get("capsules"), label + ".capsules", 128)
+            if not capsules:
+                raise ValueError("Physical component capsules may not be empty")
+            component_capsules += len(capsules)
+            if component_capsules > MAX_COMPONENT_CAPSULES:
+                raise ValueError("Component geometry exceeds the 2048 capsule budget")
+            for capsule in capsules:
+                for key in ("start", "end"):
+                    capsule[key] = point(capsule.get(key), label + "." + key)
+                capsule["radius_mm"] = _physical_dimension(capsule.get("radius_mm"), "component radius_mm")
+
+    def component_fields(record, label):
+        if "axis" in record:
+            vector = list(core._point(record["axis"], label + ".axis"))
+            if abs(math.hypot(*vector) - 1.) > 1e-6:
+                raise ValueError("Component axis must be a unit WCS direction vector")
+            record["axis"] = vector
+        if record.get("physical_envelope") is not None:
+            physical_envelope(record["physical_envelope"], label + ".physical_envelope")
 
     box(net.get("bounds"), "bounds")
     nodes = _records(net.get("nodes"), "nodes", MAX_NODES)
@@ -129,6 +179,7 @@ envelopes use ``units``. Missing engineering metadata remains missing.
             raise ValueError(f"Unsupported node type: {node.get('type')}")
         _identifier(node.get("system_id"), "node.system_id")
         node["position"] = point(node.get("position"), "node.position")
+        component_fields(node, "node")
         if "port_direction" in node:
             direction = list(core._point(node["port_direction"], "node.port_direction"))
             if math.sqrt(sum(v*v for v in direction)) < 1e-12:
@@ -153,10 +204,18 @@ envelopes use ``units``. Missing engineering metadata remains missing.
                 raise ValueError("Allowed positions must be inside the node movement_region")
         for key in ("nominal_diameter_mm",):
             if node.get(key) is not None:
-                node[key] = core._number(node[key], key, positive=True)
+                node[key] = _physical_dimension(node[key], key)
         for key in ("dimensions", "constraints"):
             core._mapping(node.setdefault(key, {}), f"node.{key}")
         dimensions(node["dimensions"], "node.dimensions")
+        if "reducer_approved" in node["constraints"] and not isinstance(node["constraints"]["reducer_approved"], bool):
+            raise ValueError("Reducer approval must be explicitly boolean")
+        if "reducer_source" in node["constraints"] and (not isinstance(node["constraints"]["reducer_source"], str) or not node["constraints"]["reducer_source"].strip() or len(node["constraints"]["reducer_source"]) > 2048):
+            raise ValueError("Reducer approval needs a nonempty source reference")
+        if "installation_clearance_mm" in node["constraints"]:
+            value = core._number(node["constraints"]["installation_clearance_mm"], "installation_clearance_mm")
+            if value < 0:
+                raise ValueError("Installation clearance cannot be negative")
         tolerance = node["constraints"].get("angular_tolerance_deg")
         if tolerance is not None and not 0 <= core._number(tolerance, "angular_tolerance_deg") <= 180:
             raise ValueError("Port angular tolerance must be from 0 to 180 degrees")
@@ -194,9 +253,9 @@ envelopes use ``units``. Missing engineering metadata remains missing.
         span["points"] = [point(p, "span point") for p in points]
         if any(math.dist(a, b) < 1e-8 for a, b in zip(span["points"], span["points"][1:])):
             raise ValueError("Consecutive duplicate route points are not permitted")
-        span["outer_diameter_mm"] = core._number(span.get("outer_diameter_mm"), "outer_diameter_mm", positive=True)
+        span["outer_diameter_mm"] = _physical_dimension(span.get("outer_diameter_mm"), "outer_diameter_mm")
         if span.get("nominal_diameter_mm") is not None:
-            span["nominal_diameter_mm"] = core._number(span["nominal_diameter_mm"], "nominal_diameter_mm", positive=True)
+            span["nominal_diameter_mm"] = _physical_dimension(span["nominal_diameter_mm"], "nominal_diameter_mm")
         if not isinstance(span.setdefault("modifiable", True), bool):
             raise ValueError("span.modifiable must be boolean")
         core._mapping(span.setdefault("constraints", {}), "span.constraints")
@@ -248,6 +307,9 @@ envelopes use ``units``. Missing engineering metadata remains missing.
     for obstacle in _records(net.setdefault("obstacles", []), "obstacles", MAX_OBSTACLES):
         _identifier(obstacle.get("id"), "obstacle.id")
         box(obstacle, "obstacle")
+        for flag in ("editable", "fixed", "protected", "simulation", "environment_edit_created"):
+            if flag in obstacle and not isinstance(obstacle[flag], bool):
+                raise ValueError("Obstacle " + flag + " must be boolean")
         if "floor_point" in obstacle:
             obstacle["floor_point"] = point(obstacle["floor_point"], "walkway.floor_point")
         if "floor_elevation_mm" in obstacle:
@@ -271,14 +333,15 @@ envelopes use ``units``. Missing engineering metadata remains missing.
     for room in _records(net.setdefault("compartments", []), "compartments", 128):
         _identifier(room.get("id"), "compartment.id")
         box(room, "compartment")
+    physical_support_ids = set()
     for key in ("supports", "penetrations"):
         for record in _records(net.setdefault(key, []), key, 512):
-            for field in ("position", "point", "center", "structure_point", "pipe_center", "floor_point"):
+            for field in ("position", "point", "center", "structure_point", "pipe_center", "floor_point", "contact_position"):
                 if field in record:
                     record[field] = point(record[field], f"{key}.{field}")
             for field in ("radius_mm", "pipe_outer_diameter_mm"):
                 if record.get(field) is not None:
-                    record[field] = core._number(record[field], field, positive=True)
+                    record[field] = _physical_dimension(record[field], field)
             for field in ("center_to_structure_mm", "edge_to_structure_mm"):
                 if record.get(field) is not None and core._number(record[field], field) < 0:
                     raise ValueError("Support distances cannot be negative")
@@ -286,6 +349,23 @@ envelopes use ``units``. Missing engineering metadata remains missing.
                 record["surface_normal"] = list(core._point(record["surface_normal"], "surface_normal"))
             if "offset_required" in record and not isinstance(record["offset_required"], bool):
                 raise ValueError("offset_required must be boolean")
+            if key == "supports":
+                component_fields(record, "support")
+                if record.get("dimensions") is not None:
+                    dimensions(record["dimensions"], "support.dimensions")
+                if record.get("physical_envelope") is not None or record.get("type") == "support" or record.get("dimensions"):
+                    identifier = _identifier(record.get("id"), "physical support.id")
+                    if identifier in physical_support_ids:
+                        raise ValueError("Duplicate physical support identifier")
+                    physical_support_ids.add(identifier)
+                if "contact_radius_mm" in record and not 0 < core._number(record["contact_radius_mm"], "support.contact_radius_mm") <= 1000:
+                    raise ValueError("Support contact radius must be positive and at most 1000 mm")
+    revision = net.get("environment_revision", 0)
+    if isinstance(revision, bool) or not isinstance(revision, int) or not 0 <= revision <= 1_000_000_000:
+        raise ValueError("Environment revision must be a bounded nonnegative integer")
+    edits = _records(net.get("environment_edits", []), "environment_edits", 128)
+    if len(json.dumps(edits, allow_nan=False)) > 128_000:
+        raise ValueError("Environment edit audit exceeds the 128 KB metadata budget")
     for record in _records(net.setdefault("unresolved_connections", []), "unresolved_connections", 512):
         _identifier(record.get("id"), "connection.id")
         ids = record.get("endpoint_ids")
@@ -401,7 +481,7 @@ Explicit confirmed port IDs may be supplied by a designer in candidate data.
                       "modifiable": candidate.get("modifiable", True), "constraints": {"metadata_unverified": True}}
         # Explicit designer-supplied semantics survive the CAD round trip.
         # Geometry inference cannot supply these engineering facts itself.
-        for key in ("system_type", "flow_direction", "fitting_catalog", "manufacturing", "hydraulics", "engineering_metadata", "pipe_id"):
+        for key in ("system_type", "flow_direction", "fitting_catalog", "manufacturing", "hydraulics", "engineering_metadata", "pipe_id", "source_layers"):
             if key in candidate:
                 span[key] = deepcopy(candidate[key])
         if "constraints" in candidate:
@@ -466,6 +546,23 @@ Explicit confirmed port IDs may be supplied by a designer in candidate data.
         if omitted or fallback_count:
             coverage["complete"] = False
             coverage.setdefault("notes",[]).append("Unsupported and sample-only CAD geometry prevents complete clearance verification; reliable extracted bounds remain active obstacles")
+    # Some unsupported entities never become extraction objects. Keep this
+    # evidence even when no bounds can be recovered. Face/edge diagnostics are
+    # subgeometry counts, so cannot be added as omitted drawing entities.
+    unsupported = core._mapping(cad.get("unsupported_geometry") or {}, "CAD unsupported_geometry")
+    if any(not isinstance(key, str) or isinstance(value, bool) or not isinstance(value, int) or value < 0
+           for key, value in unsupported.items()):
+        raise ValueError("CAD unsupported_geometry requires nonnegative integer entity counts")
+    whole_entities = sum(value for key, value in unsupported.items()
+                         if not key.startswith(("face:", "edge:")) and isinstance(value, int) and not isinstance(value, bool) and value > 0)
+    failed_solids = core._mapping(cad.get("counts") or {}, "CAD counts").get("failed_solid_instances", 0)
+    if isinstance(failed_solids, bool) or not isinstance(failed_solids, int) or failed_solids < 0:
+        raise ValueError("CAD failed_solid_instances requires a nonnegative integer count")
+    if whole_entities or failed_solids:
+        coverage["complete"] = False
+        coverage["unsupported_entity_count"] = whole_entities
+        coverage["failed_solid_instances"] = failed_solids
+        coverage.setdefault("notes", []).append("Source extraction reported unsupported entities or failed ACIS instances. Counts are separate from retained-envelope and omitted-object counts to avoid double-counting partial extraction; clearance coverage remains UNVERIFIED.")
     return normalize_network({"schema_version": SCHEMA, "id": cad.get("id", "cad-network"), "units": "mm", "provenance": "cad-derived",
         "drawing": drawing, "coordinate_system": deepcopy(cad.get("coordinate_system", {})), "bounds": bounds,
         "source_snapshot_sha256": cad.get("source_sha256"),

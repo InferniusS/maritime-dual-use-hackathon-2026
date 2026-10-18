@@ -22,6 +22,75 @@ TAU = math.tau
 SAMPLES = 32
 ENVELOPE_TORUS_SEGMENTS = 48
 MAX_SOLID_ENVELOPE_CAPSULES = 256
+MAX_FACETED_PREVIEW_VERTICES = 20000
+MAX_FACETED_PREVIEW_TRIANGLES = 40000
+
+
+def _faceted_mesh(entity, matrix, factor):
+    """Retain source facets as unknown physical geometry, never inferred pipes.
+
+    Collision preparation uses the complete transformed vertex AABB. Oversized
+    displays keep that entire box rather than silently dropping the component.
+    Mesh topology and semantic equipment identity remain unverified.
+    """
+    kind = entity.dxftype()
+    bounds_only = False
+    if kind == "MESH":
+        source_vertices, source_faces = entity.vertices, entity.faces
+    elif kind in ("3DFACE", "SOLID", "TRACE"):
+        source_vertices = entity.wcs_vertices(close=False)
+        source_faces = [tuple(range(len(source_vertices)))]
+    elif entity.is_poly_face_mesh:
+        records, faces = entity.indexed_faces()
+        source_vertices = (vertex.dxf.location for vertex in records)
+        source_faces = (face.indices for face in faces)
+    else:
+        # Retain closed M/N seams as source faces too. A generic mesh-builder
+        # conversion omits those faces and duplicates shared polyface vertices.
+        rows, columns = entity.dxf.m_count, entity.dxf.n_count
+        source_vertices = (vertex.dxf.location for vertex in entity.vertices)
+        source_faces = ((row*columns+column, row*columns+(column+1)%columns,
+                         ((row+1)%rows)*columns+(column+1)%columns, ((row+1)%rows)*columns+column)
+                        for row in range(rows if entity.is_m_closed else max(0, rows-1))
+                        for column in range(columns if entity.is_n_closed else max(0, columns-1)))
+    vertices, low, high, count = [], [math.inf]*3, [-math.inf]*3, 0
+    for raw in source_vertices:
+        point = _xyz([raw], matrix, factor)[0]
+        count += 1
+        for axis in range(3):
+            low[axis], high[axis] = min(low[axis], point[axis]), max(high[axis], point[axis])
+        if len(vertices) < MAX_FACETED_PREVIEW_VERTICES:
+            vertices.append(point)
+        else:
+            bounds_only = True
+    if count < 3:
+        raise ValueError("Faceted source has fewer than three vertices")
+    triangles, face_count = [], 0
+    for face in source_faces:
+        indices = list(face)
+        face_count += 1
+        if len(indices) < 3 or any(not isinstance(index, int) or not 0 <= index < count for index in indices):
+            bounds_only = True
+            continue
+        for index in range(1, len(indices)-1):
+            if len(triangles) < MAX_FACETED_PREVIEW_TRIANGLES:
+                triangles.append([indices[0], indices[index], indices[index+1]])
+            else:
+                bounds_only = True
+    if not triangles:
+        bounds_only = True
+    if bounds_only:
+        vertices = [[x,y,z] for x in (low[0],high[0]) for y in (low[1],high[1]) for z in (low[2],high[2])]
+        triangles = [[0,1,3],[0,3,2],[4,6,7],[4,7,5],[0,4,5],[0,5,1],
+                     [2,3,7],[2,7,6],[0,2,6],[0,6,4],[1,5,7],[1,7,3]]
+    return {"kind":"mesh", "vertices":vertices, "faces":triangles}, {
+        "confidence":"conservative_vertex_bounds" if bounds_only else "source_facets",
+        "surface_type":"unknown_faceted_geometry", "semantic_identity_verified":False,
+        "pipe_centerline_verified":False, "complete_vertex_bounds":{"min":low,"max":high},
+        "source_vertex_count":count, "source_face_count":face_count,
+        "display_bounds_only":bounds_only,
+        "geometry_note":"Unknown faceted source retained as a conservative whole-vertex obstacle box; no closed-solid, component identity or pipe interpretation is asserted",
+    }
 
 
 def _data(entity):
@@ -503,6 +572,7 @@ def _candidate_chains(candidates, tolerance=0.001):
             "source_handles": [handle], "instance_path": list(instance),
             "source_records": [item["source_record"] for item in selected],
             "confidence": "inferred_geometry", "requires_review": True,
+            "source_layers": sorted({item["layer"] for item in selected if isinstance(item.get("layer"), str)}),
             "semantic_pipe_size_verified": False, "connectivity_verified": False,
             "endpoint_tolerance_mm": tolerance,
             "contains_inferred_bend": any(item["confidence"] == "inferred_short_arc" for item in selected),
@@ -552,10 +622,16 @@ def inspect_cad(path, source_units="mm"):
                 name = entity.dxf.name
                 if name in block_stack or len(block_stack) > 16:
                     warnings.append(f"Skipped recursive or deeply nested INSERT {handle}")
+                    unsupported["INSERT:recursive_or_deep"] += 1
                     continue
                 block = document.blocks.get(name)
                 if block is None:
                     warnings.append(f"Missing block {name} for INSERT {handle}")
+                    unsupported["INSERT:missing_block"] += 1
+                    continue
+                if block.block_record.is_xref:
+                    warnings.append(f"External-reference INSERT {handle} is unresolved; open its authorized source drawing for inspection")
+                    unsupported["INSERT:external_reference"] += 1
                     continue
                 inserts = list(entity.multi_insert()) if entity.mcount > 1 else [entity]
                 for index, insert in enumerate(inserts):
@@ -612,6 +688,7 @@ def inspect_cad(path, source_units="mm"):
                                                for i, j in ((0,1), (0,2), (1,2))))
                             candidates.append({
                                 "id": f'{base["id"]}:axis{face_index}', "source_handle": handle,
+                                "layer": layer,
                                 "instance_path": list(instance_path), "source_record": face_index,
                                 "kind": detail["kind"], "points": _xyz(detail["points"], matrix, factor),
                                 "geometric_radius": detail["radius"] * axes[0] * factor if uniform else None,
@@ -623,6 +700,18 @@ def inspect_cad(path, source_units="mm"):
                     warnings.append(f"Partial or failed extraction of solid {base['id']}: {error}")
                     envelope.update({"eligible": False, "capsules": [], "reason": "partial_or_failed_solid_extraction"})
                     counts["failed_solid_instances"] += 1
+            elif kind in ("MESH", "3DFACE", "SOLID", "TRACE") or kind == "POLYLINE" and (entity.is_poly_face_mesh or entity.is_polygon_mesh):
+                counts["faceted_instances"] += 1
+                try:
+                    geometry, detail = _faceted_mesh(entity, parent_matrix, factor)
+                    add_object(base, "facets", geometry, **detail)
+                    counts["retained_faceted_instances"] += 1
+                    if detail["display_bounds_only"]:
+                        counts["faceted_bounds_only_instances"] += 1
+                except (ValueError, TypeError, AttributeError, IndexError, ezdxf.DXFError) as error:
+                    unsupported[kind] += 1
+                    counts["failed_faceted_instances"] += 1
+                    warnings.append(f"Failed extraction of faceted source {base['id']}: {error}")
             elif kind == "LINE":
                 add_object(base, "curve", {"kind": "polyline", "points": _xyz([entity.dxf.start, entity.dxf.end], parent_matrix, factor)},
                            confidence="source_curve", pipe_centerline_verified=False)

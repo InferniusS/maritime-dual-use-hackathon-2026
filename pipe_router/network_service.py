@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 from concurrent.futures import ThreadPoolExecutor
 import json
+import shutil
 import math
 from pathlib import Path
 import threading
@@ -32,6 +33,7 @@ class NetworkWorkspace:
         self.lock = threading.RLock()
         self.reviews = {}
         self.jobs = {}
+        self.environment_revisions = {}
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="connected-network")
         self.active = 0
 
@@ -50,7 +52,8 @@ class NetworkWorkspace:
 
     @staticmethod
     def _example_paths():
-        return sorted((ROOT / "examples" / "connected").glob("*.json")) + sorted((ROOT / "examples" / "multi-system").glob("*.json"))
+        return [path for folder in ("connected", "multi-system", "industrial")
+                for path in sorted((ROOT / "examples" / folder).glob("*.json"))]
 
     def example(self, identifier):
         # Match known stems rather than interpreting any client-controlled path.
@@ -87,6 +90,7 @@ class NetworkWorkspace:
         declared and does not change independent validation of the full network.
         """
         from pipe_router.network_fittings import fitting_envelopes, span_occupied_segments
+        from pipe_router.network_components import component_geometry
         spans, count, complete = [], 0, True
         for span in network["spans"]:
             fitting = fitting_envelopes(span)
@@ -99,18 +103,32 @@ class NetworkWorkspace:
             spans.append({"id":span["id"], "cad_handle":span.get("cad_handle"), "segments":segments,
                           "fittings":[{key:value for key,value in item.items() if key != "capsules"} for item in fitting["fittings"]],
                           "catalog_status":(span.get("fitting_catalog") or {}).get("status","missing"), "issues":fitting["issues"]})
-        return {"spans":spans,"complete":complete,"segment_count":count,
+        return {"spans":spans,"components":component_geometry(network),"complete":complete,"segment_count":count,
                 "scope":"Conservative validation capsules for declared pipe and fitting dimensions; no commercial-solid approval", 
                 "notes":[] if complete else ["Physical visualization truncated at 2000 occupancy segments; centerlines and full validation remain available"]}
 
     def _remember(self, network, result):
         from pipe_router.connected import network_digest
+        geometry = {"original": self.display_geometry(network),
+                    "proposed": self.display_geometry(result["proposed_network"]) if result.get("proposed_network") else None}
         token = uuid.uuid4().hex
         with self.lock:
+            self._assert_environment_current(network)
             self._trim()
             self.reviews[token] = {"created": time.monotonic(), "network": copy.deepcopy(network), "result": copy.deepcopy(result), "digest": network_digest(network), "revision": network.get("drawing", {}).get("revision")}
         return {"network": network, "result": result, "review_token": token,
-                "geometry":{"original":self.display_geometry(network),"proposed":self.display_geometry(result["proposed_network"]) if result.get("proposed_network") else None}}
+                "geometry":geometry}
+
+    @staticmethod
+    def _environment_key(network):
+        drawing = network["drawing"]
+        return network["id"], drawing["id"], drawing["revision"], network.get("analysis_session_id")
+
+    def _assert_environment_current(self, network):
+        """Called under lock: reject stale editors and late calculation results."""
+        latest = self.environment_revisions.get(self._environment_key(network))
+        if latest is not None and network.get("environment_revision", 0) != latest:
+            raise NetworkRequestError(409, "Obstacle environment changed. Inspect the current source and calculate again")
 
     @staticmethod
     def _budget(payload):
@@ -197,6 +215,10 @@ class NetworkWorkspace:
             network = reconstruct_network(cad, tolerance_mm=payload.get("tolerance_mm", 1))
         else:
             network = self._network(payload)
+        # An explicitly opened source starts a separate analysis session. Its
+        # later edits retain this ID, so reloading an original example/drawing
+        # cannot accidentally reset the stale-result ledger for an older job.
+        network.setdefault("analysis_session_id", uuid.uuid4().hex)
         return {"network": network, "validation": validate_network(network), "geometry":self.display_geometry(network)}
 
     def dispatch(self, action, payload):
@@ -204,6 +226,29 @@ class NetworkWorkspace:
             raise NetworkRequestError(422, "Input must be an object")
         if action == "inspect":
             return self.inspect(payload)
+        if action == "obstacles/edit":
+            from pipe_router.network_obstacles import edit_obstacle
+            network = self._network(payload)
+            with self.lock:
+                self._assert_environment_current(network)
+            edited = edit_obstacle(network, payload.get("operation"))
+            with self.lock:
+                # Compare again after independent analysis: two simultaneous
+                # editors cannot both publish the next environment revision.
+                self._assert_environment_current(network)
+                key = self._environment_key(network)
+                if key not in self.environment_revisions and len(self.environment_revisions) >= 128:
+                    raise NetworkRequestError(409, "Workspace environment revision limit reached; start a new workspace")
+                self.environment_revisions[key] = edited["network"]["environment_revision"]
+                # A changed environment invalidates outstanding approval and
+                # cancels any older calculation of the same supplied network.
+                for job in self.jobs.values():
+                    if job.get("_environment_key") == key and job["status"] in ("queued", "running"):
+                        job["_cancel"].set()
+                for token, review in list(self.reviews.items()):
+                    if self._environment_key(review["network"]) == key:
+                        del self.reviews[token]
+            return {**edited, "geometry": self.display_geometry(edited["network"])}
         if action == "confirm":
             from pipe_router.network_model import confirm_connections
             from pipe_router.network_validation import validate_network
@@ -219,7 +264,9 @@ class NetworkWorkspace:
             from pipe_router.connected import optimize_network
             network, budget = self._network(payload), self._budget(payload)
             options = self._options(payload, network)
-            self._claim()
+            with self.lock:
+                self._assert_environment_current(network)
+                self._claim()
             try:
                 return self._remember(network, optimize_network(network, max_evaluations=budget, **options))
             finally:
@@ -244,18 +291,25 @@ class NetworkWorkspace:
         from pipe_router.connected import optimize_network
         network, budget = self._network(payload), self._budget(payload)
         options = self._options(payload, network)
-        self._claim()
         identifier = uuid.uuid4().hex
-        job = {"id": identifier, "status": "queued", "created": time.monotonic(), "elapsed_seconds": 0, "_cancel": threading.Event(), "response": None, "error": None}
+        job = {"id": identifier, "status": "queued", "created": time.monotonic(), "elapsed_seconds": 0,
+               "progress": {"phase": "queued", "evaluations": 0}, "_environment_key": self._environment_key(network),
+               "_cancel": threading.Event(), "response": None, "error": None}
         with self.lock:
+            self._assert_environment_current(network)
+            self._claim()
             self._trim()
             self.jobs[identifier] = job
         def run():
             job["status"] = "running"
             started = time.perf_counter()
             job["_started"] = started
+            def report_progress(progress):
+                with self.lock:
+                    job["progress"] = copy.deepcopy(progress)
             try:
-                result = optimize_network(network, max_evaluations=budget, cancelled=job["_cancel"].is_set, **options)
+                result = optimize_network(network, max_evaluations=budget, cancelled=job["_cancel"].is_set,
+                                          progress=report_progress, **options)
                 if job["_cancel"].is_set():
                     job["status"] = "cancelled"
                 else:
@@ -274,8 +328,12 @@ class NetworkWorkspace:
             except Exception as error:
                 # A response to the current local client may describe validation;
                 # no source geometry is written to logs or telemetry.
-                job["error"] = str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__
-                job["status"] = "failed"
+                with self.lock:
+                    if job["_cancel"].is_set():
+                        job["status"] = "cancelled"
+                    else:
+                        job["error"] = str(error) if isinstance(error, (ValueError, RuntimeError, NetworkRequestError)) else type(error).__name__
+                        job["status"] = "failed"
             finally:
                 job["elapsed_seconds"] = time.perf_counter() - started
                 self._release()
@@ -303,6 +361,7 @@ class NetworkWorkspace:
             record = self.reviews.get(token) if isinstance(token, str) else None
             if record is None or time.monotonic() - record["created"] > 3600:
                 raise NetworkRequestError(409, "Review expired. Calculate and review the network again")
+            self._assert_environment_current(network)
             if network_digest(network) != record["digest"] or network.get("drawing", {}).get("revision") != record["revision"]:
                 raise NetworkRequestError(409, "Source geometry or drawing revision changed. Calculate and review again")
             result = copy.deepcopy(record["result"])
@@ -311,7 +370,16 @@ class NetworkWorkspace:
         identifier = uuid.uuid4().hex
         folder = self.output / identifier
         folder.mkdir(parents=True)
-        exports = export_network(network, result, folder)
+        try:
+            exports = export_network(network, result, folder)
+            with self.lock:
+                self._assert_environment_current(network)
+                if self.reviews.get(token) is not record:
+                    raise NetworkRequestError(409, "Review expired while preparing exports. Calculate and review again")
+        except Exception:
+            # This newly generated folder has never been published to a client.
+            shutil.rmtree(folder)
+            raise
         # A pure filename mapping is returned; adapters control the URL prefix.
         files = {name: filename for name, filename in exports.items() if isinstance(filename, str) and Path(filename).name in EXPORT_NAMES}
         if not files:

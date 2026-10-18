@@ -16,6 +16,7 @@ import tempfile
 from typing import Any
 
 from .network_manufacturing import manufacture_network
+from .network_components import component_geometry
 
 _EXPORT_FILES = {
     "instructions": "instructions.json", "instructions_markdown": "instructions.md",
@@ -59,6 +60,7 @@ def _coordinates(original, candidate):
 
 def _components(network, manufacture):
     rows = []
+    physical = {item["id"]: item for item in component_geometry(network)}
     for piece in manufacture["pieces"]:
         point = piece["points"][0] if piece["points"] else [None]*3
         rows.append([piece["id"], _display(piece.get("cad_handle")), piece.get("system_id"), "manufacturing piece",
@@ -71,9 +73,18 @@ def _components(network, manufacture):
                      _display(fitting.get("nominal_diameter_mm")), spec, 1, *point, "mm",
                      "Location is centerline tangent intersection; tangent points and arc center are in instructions.json. Catalog selection is not a purchase approval.", fitting["verification_status"]])
     for node in network.get("nodes", []):
+        body = physical.get(node["id"])
+        specification = _json({"dimensions": body["dimensions"], "axis": body["axis"],
+                               "physical_envelope": {key: body[key] for key in ("representation", "min", "max", "capsules", "source", "conservative")}}) if body else _display((node.get("dimensions") or {}).get("specification"))
         rows.append([node["id"], _display(node.get("cad_handle")), node.get("system_id"), node.get("type"),
-                     _display(node.get("nominal_diameter_mm")), _display((node.get("dimensions") or {}).get("specification")), 1,
-                     *node["position"], "mm", "Fixed connection: preserve global coordinates" if node.get("fixed") else "Movable only within declared permitted region", "UNVERIFIED"])
+                     _display(node.get("nominal_diameter_mm")), specification, 1,
+                     *node["position"], "mm", ("Fixed connection: preserve global coordinates" if node.get("fixed") else "Movable only within declared permitted region") + "; conservative envelope is not commercial or fabrication approval", "UNVERIFIED"])
+    for body in physical.values():
+        if body["type"] != "support" or not body["id"].startswith("support:"):
+            continue
+        rows.append([body["id"], _display(body.get("cad_handle")), _display(body.get("system_id")), "support",
+                     _display(body.get("nominal_diameter_mm")), _json({key: body[key] for key in ("dimensions", "axis", "representation", "min", "max", "capsules", "source")}), 1,
+                     *(body.get("position") or [None]*3), "mm", "Position basis: "+body["position_basis"]+"; supplied geometry does not establish support load capacity", "UNVERIFIED"])
     for weld in manufacture.get("welds", []):
         point = weld.get("position") or [None]*3
         span = next((span for span in network["spans"] if span["id"] == weld.get("span_id")), {})
@@ -286,7 +297,7 @@ def _write_dxf(path, original, proposed, manufacture):
     doc = ezdxf.new("R2013")
     doc.units = 4  # INSUNITS millimetres; WCS coordinates are never translated.
     doc.appids.new("PIPEFORGE4")
-    for name, color in (("PF4_ORIGINAL", 30), ("PF4_PROPOSED", 3), ("PF4_FITTINGS", 4), ("PF4_CONTEXT", 8), ("PF4_PORTS", 2), ("PF4_DIMENSIONS", 7)):
+    for name, color in (("PF4_ORIGINAL", 30), ("PF4_PROPOSED", 3), ("PF4_FITTINGS", 4), ("PF4_CONTEXT", 8), ("PF4_PORTS", 2), ("PF4_DIMENSIONS", 7), ("PF51_COMPONENTS", 6)):
         doc.layers.new(name, dxfattribs={"color": color})
     model = doc.modelspace()
     for state, network in (("original", original), ("proposed", proposed)):
@@ -311,6 +322,17 @@ def _write_dxf(path, original, proposed, manufacture):
             for axis in (1,2,4):
                 if not index&axis:
                     model.add_line(corners[index], corners[index|axis], dxfattribs={"layer":"PF4_CONTEXT"})
+    for body in component_geometry(proposed):
+        if body["min"] is None:
+            continue
+        # Wire bounds deliberately remain review envelopes, not fabricated CAD solids.
+        low, high = body["min"], body["max"]
+        corners = [[high[0] if mask&1 else low[0], high[1] if mask&2 else low[1], high[2] if mask&4 else low[2]] for mask in range(8)]
+        for index in range(8):
+            for axis in (1, 2, 4):
+                if not index&axis:
+                    entity = model.add_line(corners[index], corners[index|axis], dxfattribs={"layer":"PF51_COMPONENTS"})
+                    entity.set_xdata("PIPEFORGE4", [(1000, "conservative_component_envelope")]+[(1000, body["id"][part:part+255]) for part in range(0, len(body["id"]), 255)])
     doc.saveas(path)
 
 
@@ -391,7 +413,7 @@ def _markdown(instructions):
              f"Source drawing: {instructions['drawing'].get('id')} / revision {instructions['source_revision']}",
              "", "Coordinates are global WCS, in millimetres. Do not move fixed ports. A bundle is not approval to replace native CAD solids.",
              "Verify the drawing revision and object handles before implementation. Review every FAIL and UNVERIFIED item before fabrication.",
-             "", "Original routes: PF4_ORIGINAL; proposed routes: PF4_PROPOSED; physical bend centerlines: PF4_FITTINGS; dimensions are labelled in mm.", ""]
+             "", "Original routes: PF4_ORIGINAL; proposed routes: PF4_PROPOSED; physical bend centerlines: PF4_FITTINGS; conservative component wire bounds: PF51_COMPONENTS. Dimensions are labelled in mm.", ""]
     audit = instructions["network_audit"]
     lines.extend(["## Whole-network calculation", instructions["engineering_explanation"], "",
                   f"Changed spans: {', '.join(audit['changed_span_ids']) or 'none'}.",
@@ -426,7 +448,7 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
     """
     from .connected import network_digest, metrics
     from .network_model import normalize_network
-    from .network_validation import validate_network
+    from .network_validation import validate_network, validation_delta
     source = normalize_network(network)
     source_digest = network_digest(source)
     revision = source.get("drawing", {}).get("revision")
@@ -472,6 +494,7 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
                    "This comparison provides no proof of global optimality. Unverified checks remain unresolved engineering decisions.")
     original_by_id = {span["id"]:span for span in source["spans"]}
     nodes_by_id = {node["id"]:node for node in candidate["nodes"]}
+    physical = component_geometry(candidate)
     unresolved = list(result.get("unresolved_issues", []))
     for check in validation["checks"]:
         if check["status"] in ("FAIL", "UNVERIFIED"):
@@ -481,7 +504,8 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
     spans = []
     for span in candidate["spans"]:
         original = original_by_id[span["id"]]
-        spans.append({"id":span["id"], "cad_handle":span.get("cad_handle"), "instance_path":span.get("instance_path", []),
+        spans.append({"id":span["id"], "pipe_id":span.get("pipe_id", span["id"]), "cad_handle":span.get("cad_handle"), "instance_path":span.get("instance_path", []),
+                      "source_instances":deepcopy(span.get("source_instances", [])), "source_layers":deepcopy(span.get("source_layers", [])),
                       "system_id":span["system_id"], "changed":span["points"] != original["points"],
                       "original_centerline_mm":original["points"], "proposed_centerline_mm":span["points"],
                       "from_node":span["from_node"], "to_node":span["to_node"],
@@ -491,13 +515,19 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
                       "original_dimensions":_dimensions(original), "proposed_dimensions":_dimensions(span),
                       "removed_segments":_segment_difference(original["points"], span["points"]),
                       "added_segments":_segment_difference(span["points"], original["points"]),
+                      "physical_component_ids":[item["id"] for item in physical if span["id"] in item["incident_span_ids"]],
+                      "validation":_component_verification(span["id"], validation),
                       "fittings":[f for f in manufacture["fittings"] if f["span_id"] == span["id"]],
                       "manufacturing_pieces":[p for p in manufacture["pieces"] if p["span_id"] == span["id"]]})
-    instructions = {"schema_version":"pipeforge.instructions/4.0", "product_version":"5.0", "status":result["status"], "proposal_id":result.get("proposal_id"),
+    instructions = {"schema_version":"pipeforge.instructions/4.0", "product_version":"5.1", "status":result["status"], "proposal_id":result.get("proposal_id"),
                     "drawing":source.get("drawing", {}), "source_revision":revision, "source_digest":source_digest,
                     "units":"mm", "coordinate_system":source["coordinate_system"], "standards_profile":source.get("standards_profile"),
                     "spans":spans, "before_metrics":before, "after_metrics":after, "original_validation":original_validation,
+                    "physical_components":physical,
+                    "topology":{"nodes":deepcopy(candidate["nodes"]), "connections":[{"span_id":span["id"], "from_node":span["from_node"], "to_node":span["to_node"], "system_id":span["system_id"], "flow_direction":span.get("flow_direction")} for span in candidate["spans"]], "unresolved_connections":deepcopy(candidate.get("unresolved_connections", []))},
+                    "environment_revision":source.get("environment_revision", 0), "environment_edits":deepcopy(source.get("environment_edits", [])),
                     "validation":validation, "unresolved_issues":unresolved, "native_apply_authorized":False, "source_input_units":source.get("input_units","mm"),
+                    "validation_delta":validation_delta(original_validation, validation),
                     "network_audit":audit, "candidate_comparison":comparison, "engineering_explanation":explanation,
                     "selection":deepcopy(selection),
                     "manufacturing":manufacture, "installation_steps":_installation_steps(source, audit, manufacture, candidate_raw is not None),
@@ -508,7 +538,7 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
                     "implementation_state":"designer_review_required" if candidate_raw is not None else "diagnostic_or_preserve_existing"}
     metadata = {key:instructions[key] for key in ("schema_version","status","proposal_id","drawing","source_revision","source_digest","units","coordinate_system","standards_profile","implementation_state")}
     metadata["source_authority"] = "User-supplied Fincantieri challenge transcription; original authoritative PDFs and commercial approval have not been independently verified."
-    metadata.update({"product_version":"5.0", "objective_config":objective_config,
+    metadata.update({"product_version":"5.1", "objective_config":objective_config,
                      "network_summary":{"span_count":len(audit["spans"]),"system_count":len(audit["systems"]),"changed_span_count":len(audit["changed_span_ids"]),"untouched_span_count":len(audit["untouched_span_ids"]),"moved_node_count":len(audit["moved_nodes"])},
                      "confidence":instructions["confidence"], "manufacturing_takeoff_basis":"Piece lengths include constituent bend lengths; fitting rows are requirements, not additional pipe length."})
     components = _components(candidate, manufacture)
@@ -543,6 +573,8 @@ def export_network(network: dict[str, Any], result: dict[str, Any], output_dir) 
         (directory/_EXPORT_FILES["instructions_markdown"]).write_text(_markdown(instructions), encoding="utf-8")
         exported_result = deepcopy(result)
         exported_result.update({"validation":validation,"manufacturing":manufacture,"export_coordinate_check":coordinate_check,
+                                "physical_components":physical,"topology":instructions["topology"],
+                                "validation_delta":instructions["validation_delta"],
                                 "original_validation":original_validation,"network_audit":audit,"candidate_comparison":comparison,
                                 "engineering_explanation":explanation,"confidence":instructions["confidence"],"installation_steps":instructions["installation_steps"],
                                 "before":instructions["before_metrics"],"after":instructions["after_metrics"],

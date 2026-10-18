@@ -140,3 +140,16 @@ credentials.json
 secrets.json
 connected-benchmark.json
 local-output/
+
+# Additional confidential CAD/mesh inputs and derived assets stay local.
+*.stl
+*.obj
+*.ply
+*.off
+*.gltf
+*.glb
+*.fbx
+*.3dm
+*.dae
+*.3ds
+*.dgn

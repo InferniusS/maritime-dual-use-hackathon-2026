@@ -76,3 +76,15 @@ original["spans"]![0]!["points"]![1]![1] = 100;
 try { binding.Verify(original); throw new InvalidOperationException("Binding did not copy extraction evidence"); }
 catch (InvalidOperationException exception) when (exception.Message.Contains("Reinspect")) { checks++; Console.WriteLine("PASS extraction evidence is immutable"); }
 Console.WriteLine($"{checks} native source-binding checks passed; Autodesk runtime was not executed.");
+var measured = NetworkProgressStatus.Format(JsonNode.Parse("""
+{"status":"running","progress":{"phase":"independent_validation","selected_span_count":40,"completed_neighborhoods":3,"total_neighborhoods":7,"evaluations":5,"max_evaluations":24,"local_solves":9,"expanded_states":1200,"grid_nodes_peak":6000,"active_span_ids":["pipe-a","pipe-b"]}}
+""")!.AsObject(), 2.5);
+foreach (var expected in new[] { "independent validation", "Selected spans: 40", "Neighborhoods completed: 3 / 7", "Candidates evaluated: 5 / 24", "expanded states: 1200", "peak grid nodes: 6000", "pipe-a, pipe-b" })
+    if (!measured.Contains(expected)) throw new InvalidOperationException("Missing measured progress: " + expected);
+var waiting = NetworkProgressStatus.Format(new JsonObject { ["status"] = "queued" }, 0);
+if (!waiting.Contains("Waiting for measured") || waiting.Contains('%') || waiting.Contains("Candidates evaluated"))
+    throw new InvalidOperationException("Missing counters fabricated progress");
+Console.WriteLine("8 native measured-progress assertions passed; no Autodesk UI runtime was executed.");
+var invalid = NetworkProgressStatus.Format(JsonNode.Parse("""{"status":"running","progress":{"evaluations":12.5,"expanded_states":-1}}""")!.AsObject(), 1);
+if (invalid.Contains("Candidates evaluated") || invalid.Contains("expanded states")) throw new InvalidOperationException("Invalid counters fabricated an integral measurement");
+Console.WriteLine("Invalid numerical progress counters are omitted, never rounded into fabricated work.");

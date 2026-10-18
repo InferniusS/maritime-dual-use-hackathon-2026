@@ -8,17 +8,20 @@ from collections import defaultdict
 from contextvars import ContextVar
 from copy import deepcopy
 import itertools
+import json
 import math
 
 from backend.geometry import segment_box_distance, segment_distance
 from backend.spatial import SpatialCandidates
 from .network_fittings import corner_angle, fitting_envelopes, span_occupied_segments
+from .network_components import component_geometry, connection_contact_radius, support_contact_radius, PHYSICAL_NODE_TYPES
 from .network_standards import PROFILE_ID, bend_requirement, requirement, standards_profile
 
 EPS = 1e-5
 MAX_PHYSICAL_PRIMITIVES = 8192
 MAX_NARROWPHASE_PAIRS = 250000
 _WORK_BUDGET = ContextVar("pipeforge_network_validation_budget",default=None)
+_PAIR_INDEXES = ContextVar("pipeforge_validation_pair_indexes",default=None)
 
 
 def _consume_work():
@@ -33,6 +36,9 @@ def _preflight(network):
     """Reject pathological geometry before allocating sampled arc envelopes."""
     primitives=0
     self_pair_work=0
+    for item in list(network.get("nodes",[]))+list(network.get("supports",[])):
+        if item.get("type") in PHYSICAL_NODE_TYPES or item.get("physical_envelope") is not None:
+            primitives+=len((item.get("physical_envelope") or {}).get("capsules",[])) or 1
     for span in network.get("spans",[]):
         points=span.get("points",[])
         count=max(0,len(points)-1)
@@ -97,6 +103,7 @@ def _outside_sphere(capsule, center, radius):
 
 
 def _outside_connections(capsules, connections):
+    if not connections:return capsules
     result = list(capsules)
     for center,radius in connections:
         result=[part for capsule in result for part in _outside_sphere(capsule,center,radius)]
@@ -120,7 +127,15 @@ def _obstacle_gap(capsule, obstacle):
 def _minimum_pair(left,right):
     if not left or not right:return math.inf
     if len(right)<8:return min(_capsule_gap(a,b) for a in left for b in right)
-    index=SpatialCandidates([_capsule_bounds(cap) for cap in right])
+    cache=_PAIR_INDEXES.get()
+    entry=cache.get(id(right)) if cache is not None else None
+    if entry is None:
+        index=SpatialCandidates([_capsule_bounds(cap) for cap in right])
+        # Retain the list itself to prevent id reuse. The request-local cache
+        # cannot retain stale geometry between source revisions or requests.
+        if cache is not None and len(cache)<256 and sum(len(item[0]) for item in cache.values())+len(right)<=16384:
+            cache[id(right)]=(right,index)
+    else:index=entry[1]
     minimum=math.inf
     for cap in left:
         center=[(a+b)/2 for a,b in zip(cap["start"],cap["end"])]
@@ -134,6 +149,53 @@ def _minimum_pair(left,right):
 def _capsule_bounds(capsule):
     return ([min(a,b)-capsule["radius"] for a,b in zip(capsule["start"],capsule["end"])],
             [max(a,b)+capsule["radius"] for a,b in zip(capsule["start"],capsule["end"])])
+
+
+def _union_bounds(capsules):
+    boxes=[_capsule_bounds(cap) for cap in capsules]
+    return ([min(box[0][axis] for box in boxes) for axis in range(3)],
+            [max(box[1][axis] for box in boxes) for axis in range(3)]) if boxes else None
+
+
+def _box_gap(left,right):
+    distances=[max(right[0][i]-left[1][i],left[0][i]-right[1][i]) for i in range(3)]
+    return math.sqrt(sum(max(0,value)**2 for value in distances)) if any(value>0 for value in distances) else max(distances)
+
+
+def _component_pipe_gap(component,capsules):
+    if component["representation"]=="aabb":
+        return min((_obstacle_gap(cap,component) for cap in capsules),default=math.inf)
+    return _minimum_pair(component["capsules"],capsules)
+
+
+def _component_gap(left,right):
+    if left["representation"]=="aabb" and right["representation"]=="aabb":
+        _consume_work()
+        return _box_gap((left["min"],left["max"]),(right["min"],right["max"]))
+    if left["representation"]=="aabb":return _component_pipe_gap(left,right["capsules"])
+    return _component_pipe_gap(right,left["capsules"])
+
+
+def _component_obstacle_gap(component,obstacle):
+    if component["representation"]!="aabb":
+        return min((_obstacle_gap(cap,obstacle) for cap in component["capsules"]),default=math.inf)
+    if obstacle.get("capsules"):
+        return min(_obstacle_gap(cap,component) for cap in obstacle["capsules"])
+    _consume_work()
+    return _box_gap((component["min"],component["max"]),(obstacle["min"],obstacle["max"]))
+
+
+def _support_contact_parts(component,span,capsules,clearance):
+    """Exempt only primitives actually touching the declared attachment point.
+
+    A later returning leg is not the same physical attachment, even if it enters
+    the same contact ball. Spatial proximity never authorizes another joint.
+    """
+    center=component["contact_position"]
+    radius=support_contact_radius(component,span,clearance)
+    def key(cap):return ("pipe",cap.get("segment_index")) if cap["kind"]=="pipe" else ("fitting",cap["component_id"])
+    attached={key(cap) for cap in capsules if float(segment_distance(center,center,cap["start"],cap["end"]))<=cap["radius"]+EPS}
+    return [part for cap in capsules for part in (_outside_sphere(cap,center,radius) if key(cap) in attached else [cap])]
 
 
 class _ObstacleIndex:
@@ -278,17 +340,19 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
     tolerance=float(network.get("tolerance_mm",network.get("connection_tolerance_mm",0.01)))
     coverage=network.get("coverage") or {}
     coverage_unknown=not coverage.get("complete",False) or coverage.get("omitted_count",0)>0 or coverage.get("unknown_count",0)>0
-    occupancy={span["id"]:span_occupied_segments(span) for span in spans}
-    obstacle_index=_ObstacleIndex(network.get("obstacles",[]))
     fitting_data={span["id"]:fitting_envelopes(span) for span in spans}
-    physical_nodes=[node for node in nodes.values() if node.get("type") in ("valve","tee","junction","fitting")]
-    component_envelopes={}
-    component_unknown=[]
-    for node in physical_nodes:
-        radius=node.get("dimensions",{}).get("body_radius_mm")
-        if isinstance(radius,(int,float)) and math.isfinite(radius) and radius>0:
-            component_envelopes[node["id"]]={"start":node["position"],"end":node["position"],"radius":radius,"kind":"fitting","component_id":node["id"]}
-        else:component_unknown.append({"id":node["id"],"reason":"valve/junction/fitting conservative body envelope missing"})
+    occupancy={span["id"]:span_occupied_segments(span,fitting_data[span["id"]]) for span in spans}
+    occupancy_bounds={identifier:_union_bounds(capsules) for identifier,capsules in occupancy.items()}
+    fitting_occupancy={identifier:[cap for cap in caps if cap["kind"]=="fitting"] for identifier,caps in occupancy.items()}
+    obstacle_index=_ObstacleIndex(network.get("obstacles",[]))
+    physical_nodes=[node for node in nodes.values() if node.get("type") in PHYSICAL_NODE_TYPES]
+    components=component_geometry(network)
+    component_envelopes={item["id"]:item for item in components if item["min"] is not None}
+    component_unknown=[{"id":item["id"],"reason":"component physical geometry is incomplete","issues":item["issues"]} for item in components if item["status"]=="UNVERIFIED"]
+    component_failures=[{"id":item["id"],"issues":item["issues"]} for item in components if item["status"]=="FAIL"]
+    checks.append(_aggregate("components.physical_geometry",component_failures,component_unknown,
+                             "Supplied finite component envelopes, dimensions and conservative representation consistency",
+                             {"component_count":len(components),"known_envelope_count":len(component_envelopes),"exact_solid_verification":False},applicable=bool(components)))
     # 1. Explicit graph incidence and endpoint geometry. Proximity never creates
     # a graph edge in this independent checker.
     failures,unknown,adjacency=[],[],defaultdict(set)
@@ -306,7 +370,7 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             failures.append({"id":span["id"],"endpoint_error_mm":errors,"tolerance_mm":tolerance})
         adjacency[a].add(b);adjacency[b].add(a)
     for node in nodes.values():
-        if not adjacency[node["id"]]: failures.append({"id":node["id"],"reason":"unconnected component"})
+        if not adjacency[node["id"]] and node.get("type")!="support": failures.append({"id":node["id"],"reason":"unconnected component"})
         attached=[span["id"] for span in spans if node["id"] in (span.get("from_node"),span.get("to_node"))]
         if len(attached) > 2 and node.get("type") not in ("tee","junction","system_boundary"):
             ports=node.get("constraints",{}).get("port_nominal_diameters_mm",{})
@@ -432,20 +496,19 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
     pair_collisions,pair_clearance,fitting_collisions=[],[],[]
     minimum_pipe_gap=math.inf
     contact_exemptions=[]
+    pruned_span_pairs=0
+    component_measurements=defaultdict(list)
     for i,span in enumerate(spans):
         own=occupancy[span["id"]]
         for other in spans[i+1:]:
+            if _box_gap(occupancy_bounds[span["id"]],occupancy_bounds[other["id"]])>max(clearance,minimum_pipe_gap):
+                pruned_span_pairs+=1;continue
             shared=set((span.get("from_node"),span.get("to_node"))) & set((other.get("from_node"),other.get("to_node")))
             shared.discard(None)
             connections=[]
             for node_id in shared:
                 if node_id not in nodes:continue
-                region=(span.get("outer_diameter_mm") or 0)/2+(other.get("outer_diameter_mm") or 0)/2+clearance
-                declared=nodes[node_id].get("constraints",{}).get("contact_radius_mm")
-                # Custom larger physical junction bodies require explicit
-                # bounded dimensions; free-form infinite exemptions forbidden.
-                if declared is not None and 0 < declared <= 1000:
-                    region=max(region,declared)
+                region=connection_contact_radius(nodes[node_id],span,other,clearance)
                 connections.append((nodes[node_id]["position"],region))
                 contact_exemptions.append({"node_id":node_id,"spans":[span["id"],other["id"]],"radius_mm":region})
             left=_outside_connections(own,connections)
@@ -455,7 +518,9 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             evidence={"id":span["id"],"other_id":other["id"],"surface_gap_mm":gap}
             if gap < -EPS:pair_collisions.append(evidence)
             if gap+EPS<clearance:pair_clearance.append(evidence)
-            fitting_gap=min(_minimum_pair([a for a in left if a["kind"]=="fitting"],right),_minimum_pair(left,[b for b in right if b["kind"]=="fitting"]))
+            left_fittings=[a for a in left if a["kind"]=="fitting"] if connections else fitting_occupancy[span["id"]]
+            right_fittings=[b for b in right if b["kind"]=="fitting"] if connections else fitting_occupancy[other["id"]]
+            fitting_gap=min(_minimum_pair(left_fittings,right),_minimum_pair(left,right_fittings))
             if fitting_gap < -EPS:fitting_collisions.append({**evidence,"surface_gap_mm":fitting_gap})
         # Self-intersections away from adjacent straight/arc connections.
         straights=[item for item in own if item["kind"]=="pipe"]
@@ -483,31 +548,43 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
     unknown_geometry=[{"id":span["id"],"reason":"physical outer diameter missing"} for span in spans if not span.get("outer_diameter_mm")]
     for node_id,envelope in component_envelopes.items():
         for span in spans:
+            threshold=max(clearance,minimum_pipe_gap,envelope["constraints"].get("installation_clearance_mm",0))
+            if _box_gap((envelope["min"],envelope["max"]),occupancy_bounds[span["id"]])>threshold:continue
             capsules=occupancy[span["id"]]
-            if node_id in (span.get("from_node"),span.get("to_node")):
+            endpoint_segments=set()
+            if envelope["type"]=="support" and span["id"] in envelope["incident_span_ids"] and envelope.get("contact_radius_mm") and envelope.get("contact_position") is not None:
+                capsules=_support_contact_parts(envelope,span,capsules,clearance)
+            elif node_id in (span.get("from_node"),span.get("to_node")):
                 # Only the actual endpoint leg connects to the body. Excluding
                 # every primitive of an incident span hides returning legs and
                 # elbows that penetrate their own valve or junction.
-                endpoint_segments=set()
                 if node_id==span.get("from_node"):endpoint_segments.add(0)
                 if node_id==span.get("to_node"):endpoint_segments.add(len(span["points"])-2)
-                region=envelope["radius"]+(span.get("outer_diameter_mm") or 0)/2+clearance
+                body_extent=max(math.dist(envelope["position"],point) for point in itertools.product(*zip(envelope["min"],envelope["max"])))
+                region=body_extent+(span.get("outer_diameter_mm") or 0)/2+clearance
                 capsules=[part for cap in capsules for part in (
-                    _outside_sphere(cap,envelope["start"],region)
+                    _outside_sphere(cap,envelope["position"],region)
                     if cap["kind"]=="pipe" and cap.get("segment_index") in endpoint_segments else [cap])]
-            gap=_minimum_pair([envelope],capsules)
+            gap=_component_pipe_gap(envelope,capsules)
             minimum_pipe_gap=min(minimum_pipe_gap,gap)
             row={"id":node_id,"other_id":span["id"],"surface_gap_mm":gap,"reason":"physical component body versus pipe outside its endpoint contact leg"}
             if gap < -EPS:pair_collisions.append(row);fitting_collisions.append(row)
             if gap+EPS<clearance:pair_clearance.append(row)
+            if envelope["type"]=="flange":
+                installation_caps=[cap for cap in occupancy[span["id"]] if not (cap["kind"]=="pipe" and cap.get("segment_index") in endpoint_segments)]
+                installation_gap=_component_pipe_gap(envelope,installation_caps)
+                component_measurements[node_id].append({**row,"surface_gap_mm":installation_gap})
     bodies=list(component_envelopes.values())
     for index,left in enumerate(bodies):
         for right in bodies[index+1:]:
-            gap=_capsule_gap(left,right)
+            if _box_gap((left["min"],left["max"]),(right["min"],right["max"]))>max(clearance,minimum_pipe_gap,left["constraints"].get("installation_clearance_mm",0),right["constraints"].get("installation_clearance_mm",0)):continue
+            gap=_component_gap(left,right)
             minimum_pipe_gap=min(minimum_pipe_gap,gap)
-            row={"id":left["component_id"],"other_id":right["component_id"],"surface_gap_mm":gap,"reason":"physical component body pair"}
+            row={"id":left["id"],"other_id":right["id"],"surface_gap_mm":gap,"reason":"physical component body pair"}
             if gap < -EPS:pair_collisions.append(row);fitting_collisions.append(row)
             if gap+EPS<clearance:pair_clearance.append(row)
+            component_measurements[left["id"]].append(row)
+            component_measurements[right["id"]].append({**row,"id":right["id"],"other_id":left["id"]})
     checks.append(_aggregate("collision.pipe_to_pipe",pair_collisions,unknown_geometry,"Finite pipe/fitting envelopes against all other network spans",{"minimum_surface_gap_mm":minimum_pipe_gap if math.isfinite(minimum_pipe_gap) else None,"bounded_port_exemptions":contact_exemptions},applicable=len(spans)>1 or bool(pair_collisions)))
     obstacle_collisions=defaultdict(list)
     obstacle_clearance=[]
@@ -535,15 +612,19 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             fitting_gap=min((_obstacle_gap(cap,obstacle) for cap in capsules if cap["kind"]=="fitting"),default=math.inf)
             if fitting_gap < -EPS:fitting_collisions.append({**record,"surface_gap_mm":fitting_gap})
     for node_id,envelope in component_envelopes.items():
-        node=nodes[node_id]
-        for obstacle in obstacle_index.candidates([envelope],clearance,force_all=bool(node.get("constraints",{}).get("connected_obstacle_ids"))):
-            constraints=node.get("constraints",{})
-            if obstacle.get("id") in constraints.get("connected_obstacle_ids",[]) and constraints.get("contact_radius_mm",0)>=envelope["radius"]:
+        node=nodes.get(node_id,{})
+        # Components are few and retain a full exact scan. Using an enclosing
+        # sphere to select only nearby boxes could lose the true minimum gap.
+        for obstacle in obstacle_index.candidates([{"start":envelope["position"],"end":envelope["position"],"radius":0}],clearance,force_all=True):
+            constraints=envelope["constraints"]
+            extent=max(math.dist(envelope["position"],point) for point in itertools.product(*zip(envelope["min"],envelope["max"])))
+            if obstacle.get("id") in constraints.get("connected_obstacle_ids",[]) and constraints.get("contact_radius_mm",0)>=extent:
                 continue  # Whole body lies within its explicitly bounded source connection.
-            gap=_obstacle_gap(envelope,obstacle)
+            gap=_component_obstacle_gap(envelope,obstacle)
             minimum_obstacle_gap=min(minimum_obstacle_gap,gap)
             record={"id":node_id,"obstacle_id":obstacle.get("id"),"kind":obstacle.get("kind","unknown"),"surface_gap_mm":gap,"reason":"physical valve/junction body"}
             obstacle_gaps.append(record)
+            component_measurements[node_id].append(record)
             if gap < -EPS:
                 obstacle_collisions[obstacle.get("kind","unknown")].append(record)
                 fitting_collisions.append(record)
@@ -570,8 +651,8 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             for cap in occupancy[span["id"]]:
                 if not all(_inside(point,bounds,cap["radius"]) for point in (cap["start"],cap["end"])):
                     failures.append({"id":span["id"],"component_id":cap["component_id"],"radius_mm":cap["radius"]})
-        for node_id,cap in component_envelopes.items():
-            if not _inside(cap["start"],bounds,cap["radius"]):failures.append({"id":node_id,"radius_mm":cap["radius"],"reason":"physical component body outside permitted volume"})
+        for node_id,body in component_envelopes.items():
+            if not _inside(body["min"],bounds) or not _inside(body["max"],bounds):failures.append({"id":node_id,"reason":"physical component body outside permitted volume","body_min":body["min"],"body_max":body["max"]})
     checks.append(_aggregate("routing.permitted_bounds",failures,unknown,"Finite envelopes inside permitted ship volume"))
     # 11. Every individual flow-direction segment, with explicit ship axes.
     failures,unknown,pitch_rows=[],[],[]
@@ -604,9 +685,9 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             direction_unknown.append({"id":span["id"],"reason":"ship axes required for horizontal/vertical routing preference"});continue
         for index,(a,b) in enumerate(zip(span["points"],span["points"][1:])):
             delta=_sub(b,a)
-            components=[abs(_dot(delta,axes[key])) for key in ("fore_aft","athwartship","up")]
-            if sum(component>EPS for component in components)>1:
-                direction_warnings.append({"id":span["id"],"segment_index":index,"ship_axis_components_mm":components})
+            axis_components=[abs(_dot(delta,axes[key])) for key in ("fore_aft","athwartship","up")]
+            if sum(component>EPS for component in axis_components)>1:
+                direction_warnings.append({"id":span["id"],"segment_index":index,"ship_axis_components_mm":axis_components})
     checks.append(_aggregate("routing.orthogonal",direction_warnings,direction_unknown,"Prefer horizontal/vertical routing for pressurized systems",applicable=bool(pressure_spans),severity="preference"))
     # 12,13. No nominal-size interpolation; physical elbow takeouts consume
     # available straight lengths before the between-bends standard is checked.
@@ -637,17 +718,18 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
     checks.append(_aggregate("fittings.bend_radius",radius_fail,radius_unknown,"Physical catalog bend radii and supported turn angles",{"bend_count":bend_count},applicable=bend_count>0))
     checks.append(_aggregate("fittings.straight_between_bends",straight_fail,straight_unknown,"Net straights after elbow tangent takeouts",applicable=bend_count>0))
     component_catalog_unknown=[]
-    for node in physical_nodes:
+    standalone_components=[item for item in components if item["id"] not in nodes]
+    for node in physical_nodes+standalone_components:
         catalog=node.get("fitting_catalog") or {}
         if catalog.get("status")!="verified" or not catalog.get("source"):
             component_catalog_unknown.append({"id":node["id"],"reason":"valve/junction component specification and catalog approval not verified"})
-    checks.append(_aggregate("fittings.component_catalog",[],component_catalog_unknown,"Valve, tee and junction physical envelopes do not imply commercial catalog approval",applicable=bool(physical_nodes)))
+    checks.append(_aggregate("fittings.component_catalog",[],component_catalog_unknown,"Physical valve, tee, flange, reducer and support envelopes do not imply commercial catalog approval",applicable=bool(physical_nodes or standalone_components)))
     availability_fail,availability_unknown,availability_rows=[],[],[]
     required_components=[span for span in spans
                          if any(corner_angle(a,b,c)>EPS for a,b,c in zip(span["points"],span["points"][1:],span["points"][2:]))]
     component_nodes=[node for node in nodes.values() if node in physical_nodes or
                      node.get("fitting_catalog") is not None or node.get("constraints",{}).get("requires_fitting") is True]
-    for component in required_components+component_nodes:
+    for component in required_components+component_nodes+standalone_components:
         catalog=component.get("fitting_catalog") or {}
         row={"id":component["id"],"available":catalog.get("available"),"source":catalog.get("source")}
         availability_rows.append(row)
@@ -656,10 +738,66 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
         elif catalog.get("available") is not True or catalog.get("status")!="verified" or not catalog.get("source"):
             availability_unknown.append({**row,"reason":"required fitting availability and approved source not confirmed"})
     checks.append(_aggregate("fittings.availability",availability_fail,availability_unknown,"Required component availability is independent of geometric fit",{"components":availability_rows},applicable=bool(availability_rows)))
+    reducer_fail,reducer_unknown,reducer_rows=[],[],[]
+    for node in nodes.values():
+        constraints=node.get("constraints",{})
+        sizes=constraints.get("port_nominal_diameters_mm",{})
+        different=len(set(sizes.values()))>1
+        if node.get("type")!="reducer" and not different:continue
+        incident=[span for span in spans if node["id"] in (span.get("from_node"),span.get("to_node"))]
+        row={"id":node["id"],"port_nominal_diameters_mm":sizes,"reducer_approved":constraints.get("reducer_approved"),"source":constraints.get("reducer_source")}
+        reducer_rows.append(row)
+        if node.get("type")=="reducer" and len(incident)!=2:
+            reducer_fail.append({**row,"reason":"a declared inline reducer requires exactly two incident pipe connections"})
+        if constraints.get("reducer_approved") is False:
+            reducer_fail.append({**row,"reason":"dimensional transition explicitly not approved"})
+        elif constraints.get("reducer_approved") is not True or not constraints.get("reducer_source"):
+            reducer_unknown.append({**row,"reason":"explicit supplied transition permission/source required; no automatic pipe resizing"})
+        if any(span["id"] not in sizes for span in incident):
+            reducer_unknown.append({**row,"reason":"all incident reducer/transition nominal port sizes must be supplied"})
+    checks.append(_aggregate("components.reducer_compatibility",reducer_fail,reducer_unknown,"Explicit component port transitions and supplied designer permission",{"components":reducer_rows},applicable=bool(reducer_rows)))
+    install_fail,install_unknown,install_rows=[],[],[]
+    for component in components:
+        if component["type"]!="flange":continue
+        required=component["constraints"].get("installation_clearance_mm")
+        if required is None:
+            install_unknown.append({"id":component["id"],"reason":"flange installation/tool clearance requirement not supplied"});continue
+        if component["min"] is None:
+            install_unknown.append({"id":component["id"],"reason":"physical flange envelope unavailable"});continue
+        measurements=[row for row in component_measurements[component["id"]] if math.isfinite(row["surface_gap_mm"])]
+        actual=min((row["surface_gap_mm"] for row in measurements),default=None)
+        row={"id":component["id"],"required_mm":required,"measured_minimum_mm":actual,"source":"supplied component installation_clearance_mm; not an added official rule","measurements":measurements,"scope":"Conservative offset clearance to other bodies and nonconnecting pipe portions; exact bolting/tool motion not verified"}
+        install_rows.append(row)
+        if actual is not None and actual+EPS<required:install_fail.append(row)
+        if coverage_unknown:install_unknown.append({"id":component["id"],"reason":"installation surrounding geometry extraction incomplete"})
+    checks.append(_aggregate("components.installation_clearance",install_fail,install_unknown,"Supplied flange installation offsets, separate from ship shock clearance",{"components":install_rows},applicable=bool(install_rows or install_unknown)))
+    support_fail,support_unknown,support_rows=[],[],[]
+    span_map={span["id"]:span for span in spans}
+    for component in components:
+        if component["type"]!="support":continue
+        identifiers=component["incident_span_ids"]
+        contact,radius=component.get("contact_position"),component.get("contact_radius_mm")
+        if len(identifiers)!=1 or identifiers[0] not in span_map or contact is None or radius is None:
+            support_unknown.append({"id":component["id"],"reason":"one explicit attached span, contact position and bounded contact radius required"});continue
+        span=span_map[identifiers[0]]
+        distance=min(float(segment_distance(contact,contact,cap["start"],cap["end"]))-cap["radius"] for cap in occupancy[span["id"]])
+        row={"id":component["id"],"span_id":span["id"],"contact_surface_gap_mm":distance,"contact_radius_mm":radius,
+             "applied_contact_radius_mm":support_contact_radius(component,span,clearance)}
+        support_rows.append(row)
+        if distance>tolerance:support_fail.append({**row,"reason":"declared support contact is not on or within its attached physical pipe"})
+        if component["min"] is None:
+            support_unknown.append({**row,"reason":"support body geometry missing; attachment reach cannot be verified"})
+        else:
+            body_gap=_component_pipe_gap(component,[{"start":contact,"end":contact,"radius":0}])
+            allowance=max((cap["radius"] for cap in occupancy[span["id"]] if float(segment_distance(contact,contact,cap["start"],cap["end"]))<=cap["radius"]+tolerance),default=(span.get("outer_diameter_mm") or 0)/2)
+            row["body_to_contact_gap_mm"],row["physical_pipe_allowance_mm"]=body_gap,allowance
+            if body_gap>allowance+tolerance:
+                support_fail.append({**row,"reason":"declared support body does not reach its pipe attachment"})
+    checks.append(_aggregate("components.support_attachment",support_fail,support_unknown,"Support contact exceptions remain local to one explicitly attached pipe",{"components":support_rows},applicable=bool(support_rows or support_unknown)))
     # 14-16 plus manufacturing planarity/cutbacks are computed independently
     # by the manufactured-piece helper (not whole-network length).
     from .network_manufacturing import manufacture_network
-    manufacturing=manufacture_network(network)
+    manufacturing=manufacture_network(network,_fitting_assessments=fitting_data)
     checks.extend(manufacturing.get("checks",[]))
     # 17. Headroom/obstruction and supports. Absence of access/support geometry
     # is uncertainty, not an affirmative installation approval.
@@ -677,7 +815,7 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             access_unknown.append({"id":walkway.get("id"),"reason":"walkway floor elevation/point missing"});continue
         frame=[axes["fore_aft"],axes["athwartship"],axes["up"]]
         corners=[[_dot(point,axis) for axis in frame] for point in itertools.product(*zip(walkway["min"],walkway["max"]))]
-        caps=[(span["id"],cap) for span in spans for cap in occupancy[span["id"]]]+list(component_envelopes.items())
+        caps=[(span["id"],cap) for span in spans for cap in occupancy[span["id"]]]+[(identifier,cap) for identifier,body in component_envelopes.items() for cap in body["capsules"]]
         for component_id,cap in caps:
             start,end=[_dot(cap["start"],axis) for axis in frame],[_dot(cap["end"],axis) for axis in frame]
             low=[min(point[axis] for point in corners)-cap["radius"] for axis in (0,1)]+[-1e30]
@@ -686,6 +824,18 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
             if intersection is not None:
                 actual=min(_point(start,end,parameter)[2] for parameter in intersection)-cap["radius"]-floor
                 row={"id":component_id,"walkway_id":walkway.get("id"),"headroom_mm":actual,"required_mm":requirement("access.headroom")["value"],"method":"ship-up projection over conservative walkway footprint"}
+                headroom_rows.append(row)
+                if actual+EPS<requirement("access.headroom")["value"]:access_fail.append(row)
+        walkway_low=[min(point[axis] for point in corners) for axis in (0,1)]
+        walkway_high=[max(point[axis] for point in corners) for axis in (0,1)]
+        for identifier,body in component_envelopes.items():
+            if body["representation"]!="aabb":continue
+            projected=[[_dot(point,axis) for axis in frame] for point in itertools.product(*zip(body["min"],body["max"]))]
+            low=[min(point[axis] for point in projected) for axis in range(3)]
+            high=[max(point[axis] for point in projected) for axis in range(3)]
+            if all(low[i]<=walkway_high[i]+EPS and high[i]>=walkway_low[i]-EPS for i in (0,1)):
+                actual=low[2]-floor
+                row={"id":identifier,"walkway_id":walkway.get("id"),"headroom_mm":actual,"required_mm":requirement("access.headroom")["value"],"method":"ship-up projection of supplied conservative finite component bounds"}
                 headroom_rows.append(row)
                 if actual+EPS<requirement("access.headroom")["value"]:access_fail.append(row)
     if not network.get("accessibility_coverage",{}).get("complete",False):access_unknown.append({"id":network.get("id"),"reason":"installation access/tripping/passage envelope coverage not confirmed"})
@@ -789,13 +939,13 @@ def _validate_network(network, reference=None, permitted_span_ids=None):
     preference_failures=sum(item["status"]=="FAIL" and item["severity"]=="preference" for item in checks)
     hard_failures=sum(item["status"]=="FAIL" and item["severity"]=="hard" for item in checks)
     unverified=sum(item["status"]=="UNVERIFIED" for item in checks)
-    geometric_ids={"network.connectivity","collision.pipe_to_pipe","collision.pipe_to_duct","collision.pipe_to_structure","collision.fitting_envelopes","routing.permitted_bounds","environment.coverage"}
+    geometric_ids={"network.connectivity","collision.pipe_to_pipe","collision.pipe_to_duct","collision.pipe_to_structure","collision.fitting_envelopes","routing.permitted_bounds","environment.coverage","components.physical_geometry","components.support_attachment"}
     geometric=all(item["status"] in ("PASS","NOT_APPLICABLE") for item in checks if item["id"] in geometric_ids)
     engineering=hard_failures==0 and not any(item["severity"]=="hard" and item["status"]=="UNVERIFIED" for item in checks)
-    manufacturing_checks=[item for item in checks if item["id"].startswith("manufacturing.") or item["id"].startswith("fittings.") or item["id"]=="network.connection_compatibility"]
+    manufacturing_checks=[item for item in checks if item["id"].startswith("manufacturing.") or item["id"].startswith("fittings.") or item["id"].startswith("components.") or item["id"]=="network.connection_compatibility"]
     manufacturable=all(item["status"] in ("PASS","NOT_APPLICABLE") for item in manufacturing_checks)
     status="FAIL" if hard_failures else "UNVERIFIED" if unverified else "PASS"
-    return {"status":status,"checks":checks,"hard_failures":hard_failures,"unverified":unverified,"preference_warnings":preference_failures,"geometrically_feasible":geometric,"engineering_constraint_feasible":engineering,"manufacturability_verified":manufacturable,"standards_profile":PROFILE_ID,"standards_authority":standards_profile()["authority"],"scope":"Supplied explicit topology and conservative geometry; no installation approval or industrial certification","manufacturing":manufacturing,"spatial_index":{"method":"conservative bounding-sphere cKDTree with exact narrowphase","possible_obstacle_pairs":obstacle_index.total_queries,"evaluated_obstacle_pairs":obstacle_index.candidate_pairs,"minimum_clearance_scope":"exact over supplied conservative envelopes; full scan retained for bounded source-contact exceptions"}}
+    return {"status":status,"checks":checks,"hard_failures":hard_failures,"unverified":unverified,"preference_warnings":preference_failures,"geometrically_feasible":geometric,"engineering_constraint_feasible":engineering,"manufacturability_verified":manufacturable,"standards_profile":PROFILE_ID,"standards_authority":standards_profile()["authority"],"scope":"Supplied explicit topology and conservative geometry; no installation approval or industrial certification","manufacturing":manufacturing,"spatial_index":{"method":"conservative bounding-sphere cKDTree with exact narrowphase","possible_obstacle_pairs":obstacle_index.total_queries,"evaluated_obstacle_pairs":obstacle_index.candidate_pairs,"possible_span_pairs":len(spans)*(len(spans)-1)//2,"pruned_span_pairs":pruned_span_pairs,"minimum_clearance_scope":"exact over supplied conservative envelopes; full scan retained for bounded source-contact exceptions"}}
 
 
 def validate_network(network, reference=None, *, permitted_span_ids=None):
@@ -815,9 +965,43 @@ def validate_network(network, reference=None, *, permitted_span_ids=None):
     primitives=_preflight(network)
     counter=[0]
     token=_WORK_BUDGET.set(counter)
+    index_token=_PAIR_INDEXES.set({})
     try:
         result=_validate_network(network,reference,permitted_span_ids)
         result["work_budget"]={"physical_primitives":primitives,"max_physical_primitives":MAX_PHYSICAL_PRIMITIVES,"narrowphase_pairs":counter[0],"max_narrowphase_pairs":MAX_NARROWPHASE_PAIRS}
+        result["work_budget"]["request_local_index_entries"]=len(_PAIR_INDEXES.get())
         return result
     finally:
+        _PAIR_INDEXES.reset(index_token)
         _WORK_BUDGET.reset(token)
+
+
+def validation_delta(before, after):
+    """Compare independent reports without rerunning or trusting the optimizer.
+
+    Measurement changes do not make an existing component-pair violation new.
+    A newly failing rule/pair is still introduced even when another rule already
+    failed for that pair. Counts describe findings, not numbers of pipe solids.
+    """
+    identity_fields=("id","span_id","other_id","obstacle_id","fitting_id","node_id","component_id",
+                     "paired_id","piece_id","segment_index","segments","vertex_index","code","reason","field","missing")
+    def findings(report,status):
+        result={}
+        for check in report.get("checks",[]):
+            if check.get("status")!=status:continue
+            rows=check.get("evidence",{}).get("violations" if status=="FAIL" else "unverified") or [{}]
+            for row in rows:
+                row=row if isinstance(row,dict) else {"reason":str(row)}
+                identity={key:row[key] for key in identity_fields if key in row}
+                key=json.dumps([check["id"],check.get("component_ids",[]) if not identity else [],identity],sort_keys=True,separators=(",",":"))
+                result[key]={"check_id":check["id"],"severity":check.get("severity","hard"),"component_ids":check.get("component_ids",[]),"evidence":deepcopy(row)}
+        return result
+    old,new=findings(before,"FAIL"),findings(after,"FAIL")
+    old_unknown,new_unknown=findings(before,"UNVERIFIED"),findings(after,"UNVERIFIED")
+    introduced=[new[key] for key in sorted(new.keys()-old.keys())]
+    return {"introduced":introduced,"resolved":[old[key] for key in sorted(old.keys()-new.keys())],
+            "persistent":[new[key] for key in sorted(old.keys()&new.keys())],
+            "introduced_unverified":[new_unknown[key] for key in sorted(new_unknown.keys()-old_unknown.keys())],
+            "resolved_unverified":[old_unknown[key] for key in sorted(old_unknown.keys()-new_unknown.keys())],
+            "new_hard_failures":sum(row["severity"]=="hard" for row in introduced),
+            "scope":"Stable rule/component/obstacle/segment findings; measured values retained from each independent report"}

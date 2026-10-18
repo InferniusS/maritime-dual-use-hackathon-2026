@@ -3,6 +3,7 @@
 const el = id => document.getElementById(id);
 let network = null, response = null, validation = null, originalValidation = null, sourceGeometry = null, jobId = null, generation = 0, cancelRequested = false;
 let selectedComponent = null, measuring = false, measurementPoints = [], cameraPreset = null;
+let environmentChange = null, renderGeneration = 0, editingEnvironment = false;
 const systemColors = ['#087f83','#7b58b1','#b36b20','#2871ad','#b84f70','#578136','#886c4e','#4d6e7b'];
 const strategyNames = {balanced:'Balanced engineering',length:'Network length',bends:'Bend count',hydraulic:'Hydraulic pressure loss',minimal_modifications:'Design modifications',feasibility:'Congested-space feasibility'};
 function text(tag, content, className) { const node = document.createElement(tag); node.textContent = content ?? ''; if (className) node.className = className; return node; }
@@ -33,9 +34,9 @@ async function loadNetwork(raw) {
     const record = await api('inspect', {network:raw});
     if (generation !== loadingGeneration) return;
     network = record.network; validation = record.validation; originalValidation = validation; sourceGeometry = record.geometry;
-    measuring = false; measurementPoints = []; cameraPreset = null; showMeasurement();
+    measuring = false; measurementPoints = []; cameraPreset = null; environmentChange=null; showMeasurement();
     el('network-json').value = JSON.stringify(network, null, 2);
-    showNetwork(); showScope(true); showValidation(); showPlot(); showCoordinates(); showCopilot(); showTopology();
+    showNetwork(); showScope(true); showObstacles(); showValidation(); showPlot(); showCoordinates(); showCopilot(); showTopology();
     el('progress').textContent = 'Network inspected. Ready for coordinated search.';
   } finally {
     if (generation === loadingGeneration) {el('optimize').disabled = false; el('validate').disabled = false;}
@@ -44,7 +45,7 @@ async function loadNetwork(raw) {
 function showNetwork() {
   el('network-name').textContent = network.name || network.title || network.id;
   el('network-summary').textContent = `${network.nodes.length} nodes · ${network.spans.length} connected spans · ${new Set(network.spans.map(s=>s.system_id)).size} systems`;
-  el('source-info').textContent = `Drawing ${network.drawing.id} · revision ${network.drawing.revision} · ${network.provenance} · global WCS mm`;
+  el('source-info').textContent = `Drawing ${network.drawing.id} · revision ${network.drawing.revision}${environmentChange?' · environment '+environmentChange.environment_revision:''} · ${network.provenance} · global WCS mm`;
   clear('connections');
   for (const connection of network.unresolved_connections || []) {
     if (connection.status && connection.status !== 'unresolved') continue;
@@ -75,15 +76,29 @@ function spanLength(span) { return routeLength({spans:[span]}); }
 function systemIds() { return [...new Set(network.spans.map(span=>span.system_id))].sort(); }
 function systemColor(id) { return systemColors[systemIds().indexOf(id)%systemColors.length]; }
 function selectedIds(kind) { return [...el(`${kind}-selection`).querySelectorAll('input:checked')].map(input=>input.value); }
+function spanInCompartment(span,room) {
+  if(span.constraints?.required_compartments?.includes(room.id))return true;
+  return span.points.slice(1).some((end,index)=>{
+    const start=span.points[index];let lo=0,hi=1;
+    for(let axis=0;axis<3;axis++){
+      const delta=end[axis]-start[axis];
+      if(Math.abs(delta)<1e-12){if(start[axis]<room.min[axis]||start[axis]>room.max[axis])return false;}
+      else{const a=(room.min[axis]-start[axis])/delta,b=(room.max[axis]-start[axis])/delta;lo=Math.max(lo,Math.min(a,b));hi=Math.min(hi,Math.max(a,b));if(lo>hi)return false;}
+    }
+    return true;
+  });
+}
 function scopePayload() {
   if (el('selection-scope').value === 'systems') return {selected_system_ids:selectedIds('system')};
   if (el('selection-scope').value === 'spans') return {selected_span_ids:selectedIds('span')};
+  if (el('selection-scope').value === 'compartments') {const rooms=(network.compartments||[]).filter(room=>selectedIds('compartment').includes(room.id));return {selected_span_ids:network.spans.filter(span=>rooms.some(room=>spanInCompartment(span,room))).map(span=>span.id)};}
   return {};
 }
 function showScope(reset=false) {
   if (!network) return;
   if(reset) {
-    for(const kind of ['system','span'])clear(`${kind}-selection`);
+    const compartmentOption=el('selection-scope').querySelector('option[value="compartments"]');compartmentOption.disabled=!(network.compartments||[]).length;if(compartmentOption.disabled&&el('selection-scope').value==='compartments')el('selection-scope').value='all';
+    for(const kind of ['system','span','compartment'])clear(`${kind}-selection`);
     for(const id of systemIds()) {
       const label=text('label','','scope-item'),input=document.createElement('input');input.type='checkbox';input.checked=true;input.value=id;
       input.setAttribute('aria-label',`Optimize system ${id}`);input.onchange=settingsChanged;
@@ -95,12 +110,14 @@ function showScope(reset=false) {
       const description=text('span',`${span.id} · ${span.system_id}`);description.append(text('small',`${span.from_node} → ${span.to_node} · ${input.disabled?'locked':'OD '+number(span.outer_diameter_mm)+' mm'}`));
       label.append(input,description);el('span-selection').append(label);
     }
+    for(const room of network.compartments||[]){const label=text('label','','scope-item'),input=document.createElement('input');input.type='checkbox';input.checked=true;input.value=room.id;input.setAttribute('aria-label',`Optimize compartment ${room.id}`);input.onchange=settingsChanged;label.append(input,text('span',`${room.id} · ${network.spans.filter(span=>spanInCompartment(span,room)).length} intersecting / required spans`));el('compartment-selection').append(label);}
+    if(!(network.compartments||[]).length)el('compartment-selection').append(text('p','No explicit compartment bounds are supplied. Add authorized compartment geometry to use this scope.','hint'));
     const isolated=el('isolate-system').value;el('isolate-system').replaceChildren(text('option','All systems'));el('isolate-system').firstChild.value='all';
     for(const id of systemIds()){const option=text('option',id);option.value=id;el('isolate-system').append(option);}
     el('isolate-system').value=systemIds().includes(isolated)?isolated:'all';
   }
   const scope=el('selection-scope').value,payload=scopePayload();
-  el('system-selection').hidden=scope!=='systems';el('span-selection').hidden=scope!=='spans';
+  el('system-selection').hidden=scope!=='systems';el('span-selection').hidden=scope!=='spans';el('compartment-selection').hidden=scope!=='compartments';
   const active=network.spans.filter(s=>s.modifiable&&!s.constraints?.preserve_existing&&(!payload.selected_span_ids||payload.selected_span_ids.includes(s.id))&&(!payload.selected_system_ids||payload.selected_system_ids.includes(s.system_id)));
   el('scope-summary').textContent=`${active.length} spans may change · ${network.spans.length-active.length} preserved · all ${network.spans.length} spans independently validated.`;
 }
@@ -108,6 +125,60 @@ function settingsChanged() {
   if(jobId){error('Cancel the active calculation before changing optimization settings.');return;}
   invalidate();showScope();showValidation();showCopilot();showPlot();showCoordinates();showTopology();
   el('strategy-note').textContent=el('strategy').value==='hydraulic'?'Hydraulic ranking requires sourced flow, fluid, bore and friction data. Missing inputs are UNVERIFIED; no pressure-loss value is invented.':'Normalized preferences rank independently validated candidates. Hard constraints are never traded for a lower score.';
+}
+function parseCoordinates(value,label) {
+  const parts=value.split(',').map(x=>x.trim()),point=parts.map(Number);
+  if(parts.length!==3||parts.some(x=>!x)||!point.every(Number.isFinite))throw new Error(`${label}: enter three finite comma-separated global coordinates in mm.`);
+  return point;
+}
+function obstacleEditable(obstacle) {
+  if(!obstacle||obstacle.editable!==true||obstacle.fixed||obstacle.protected||obstacle.cad_handle||obstacle.source_handle||obstacle.source_handles?.length||obstacle.source?.handle)return false;
+  const structural=['structure','wall','bulkhead','deck','stiffener','beam'].includes(obstacle.kind||obstacle.type);
+  return !structural||(obstacle.simulation===true&&obstacle.environment_edit_created===true&&obstacle.origin==='designer-review');
+}
+function showObstacles(selectedId=el('obstacle-select').value) {
+  const select=el('obstacle-select');select.replaceChildren(text('option','New hypothetical review obstacle'));select.firstChild.value='';
+  for(const obstacle of network?.obstacles||[]){const option=text('option',`${obstacle.id} · ${obstacle.kind||obstacle.type||'obstacle'}${obstacleEditable(obstacle)?' · editable review':' · protected'}`);option.value=obstacle.id;select.append(option);}
+  select.value=(network?.obstacles||[]).some(item=>item.id===selectedId)?selectedId:'';showObstacleSelection();
+  if(!environmentChange){el('obstacle-change').textContent='No hypothetical environment changes applied.';el('optimize-affected').disabled=true;}
+}
+function showObstacleSelection() {
+  const obstacle=network?.obstacles?.find(item=>item.id===el('obstacle-select').value),editable=obstacleEditable(obstacle);
+  el('obstacle-id').readOnly=Boolean(obstacle);el('obstacle-kind').disabled=Boolean(obstacle);el('obstacle-min').disabled=Boolean(obstacle);el('obstacle-max').disabled=Boolean(obstacle);
+  el('obstacle-add').disabled=Boolean(obstacle)||!network;el('obstacle-move').disabled=!editable;el('obstacle-remove').disabled=!editable;el('obstacle-translation').disabled=!editable;
+  el('obstacle-edit-info').dataset.protected=String(Boolean(obstacle&&!editable));
+  if(obstacle){el('obstacle-id').value=obstacle.id;el('obstacle-kind').value=obstacle.kind||obstacle.type||'obstacle';el('obstacle-min').value=obstacle.min?.join(', ')||'';el('obstacle-max').value=obstacle.max?.join(', ')||'';el('obstacle-edit-info').textContent=editable?'Editable hypothetical review geometry. Move or remove revalidates the entire network; native CAD is preserved.':'Protected source geometry. Fixed/imported structure and CAD-handled objects cannot be moved or removed here.';}
+  else{let index=1;while(network?.obstacles?.some(item=>item.id===`review-obstacle-${index}`))index++;el('obstacle-id').value=`review-obstacle-${index}`;el('obstacle-kind').value='obstacle';el('obstacle-min').value='';el('obstacle-max').value='';el('obstacle-edit-info').textContent='New hypothetical review obstacle — does not change native CAD. Enter explicit global bounds.';}
+}
+async function editObstacle(action) {
+  if(!network)throw new Error('Load a network before editing the review environment.');
+  if(editingEnvironment)throw new Error('The current environment edit is still being validated.');
+  const id=el('obstacle-id').value.trim(),operation={action,obstacle_id:id};
+  if(!id)throw new Error('Provide a unique obstacle ID.');
+  if(action==='add'){
+    const min=parseCoordinates(el('obstacle-min').value,'Obstacle minimum'),max=parseCoordinates(el('obstacle-max').value,'Obstacle maximum');
+    if(min.some((v,i)=>v>=max[i]))throw new Error('Every maximum coordinate must be greater than its minimum.');
+    operation.obstacle={id,kind:el('obstacle-kind').value,min,max,simulation:true,editable:true,fixed:false,protected:false};
+  }else{
+    const obstacle=network.obstacles.find(item=>item.id===id);if(!obstacleEditable(obstacle))throw new Error('This source object is protected; only explicitly editable review geometry can change.');
+    if(action==='move'){operation.translation_mm=parseCoordinates(el('obstacle-translation').value,'Translation');if(operation.translation_mm.every(v=>v===0))throw new Error('Enter a nonzero translation to move the selected obstacle.');}
+  }
+  const priorJob=jobId;invalidate();showValidation();showCopilot();showPlot();editingEnvironment=true;el('optimize').disabled=true;
+  for(const name of ['obstacle-add','obstacle-move','obstacle-remove'])el(name).disabled=true;
+  el('progress').textContent='Rechecking the complete network against the edited environment…';
+  try{
+    if(priorJob){cancelRequested=true;await api(`jobs/${priorJob}/cancel`,{});}
+    const record=await api('obstacles/edit',{network,operation});
+    network=record.network;validation=record.validation;originalValidation=validation;sourceGeometry=record.geometry;environmentChange=record;
+    if(!sourceGeometry)sourceGeometry=(await api('inspect',{network})).geometry;
+    selectedComponent=action==='remove'?null:id;el('network-json').value=JSON.stringify(network,null,2);el('check-filter').value=validation.hard_failures?'FAIL':'ALL';
+    showNetwork();showScope(true);showObstacles(action==='remove'?'':id);showValidation();showCopilot();showTopology();showCoordinates();showPlot();
+    const affected=record.affected_span_ids||[],delta=record.collision_delta||{};
+    el('obstacle-change').textContent=`${action.toUpperCase()} ${id} · environment revision ${record.environment_revision}. ${affected.length} affected spans (${record.directly_affected_span_ids?.length??'—'} direct, ${record.connected_neighbor_span_ids?.length??'—'} connected neighbors). Hard failures ${delta.before?.hard_failures??'—'} → ${delta.after?.hard_failures??validation.hard_failures}. New collision pairs ${delta.new_collision_pairs?.length??'—'}. Native CAD is preserved; prior proposals and reviews were invalidated.`;
+    el('optimize-affected').disabled=!network.spans.some(span=>affected.includes(span.id)&&span.modifiable&&!span.constraints?.preserve_existing);
+    el('outcome').textContent=validation.hard_failures?'ENVIRONMENT CONFLICTS FOUND':'ENVIRONMENT RECHECKED';
+    el('progress').textContent='Environment revalidation complete. Review updated checks or optimize the affected routes.';
+  }finally{editingEnvironment=false;el('optimize').disabled=false;showObstacleSelection();}
 }
 function showMetrics() {
   clear('metrics'); if (!network) return;
@@ -189,12 +260,14 @@ function showTopology() {
 }
 function inspectComponent(selected,point) {
   if(!selected)return;clear('selection');const span=selected.span,node=selected.position?selected:null;
-  selectedComponent=span?.id||selected.id||null;
-  el('selection').append(text('strong',`Selected ${span?'pipe span':node?'connection component':'environment object'} · ${selectedComponent||'geometry'}`));
-  const fields=span?[['System',span.system_id],['CAD handle',span.cad_handle||'UNVERIFIED'],['Outer diameter',`${number(span.outer_diameter_mm)} mm`],['Centerline length',`${number(spanLength(span))} mm`],['Graph connection',`${span.from_node} → ${span.to_node}`],['State',(response?.result?.changed_span_ids||[]).includes(span.id)?'CHANGED':'UNTOUCHED']]:[['Kind',selected.type||selected.kind||'geometry'],['Source handle',selected.cad_handle||'UNVERIFIED']];
+  const component=selected.physical_component;
+  selectedComponent=span?.id||component?.id||selected.id||null;
+  el('selection').append(text('strong',`Selected ${span?'pipe span':component?'physical '+(component.type||'component'):node?'connection component':'environment object'} · ${selectedComponent||'geometry'}`));
+  const fields=span?[['System',span.system_id],['CAD handle',span.cad_handle||'UNVERIFIED'],['Outer diameter',`${number(span.outer_diameter_mm)} mm`],['Centerline length',`${number(spanLength(span))} mm`],['Graph connection',`${span.from_node} → ${span.to_node}`],['State',(response?.result?.changed_span_ids||[]).includes(span.id)?'CHANGED':'UNTOUCHED']]:component?[['Type',component.type],['Evidence',component.status||'UNVERIFIED'],['Representation',component.representation||'Conservative envelope'],['Source',typeof component.source==='string'?component.source:JSON.stringify(component.source||'UNVERIFIED')]]:[['Kind',selected.type||selected.kind||'geometry'],['Source handle',selected.cad_handle||'UNVERIFIED']];
   const grid=text('div','','inspection-grid');for(const [label,value] of fields){const item=document.createElement('div');item.append(text('span',label),text('strong',value));grid.append(item);}el('selection').append(grid);
   if(point)el('selection').append(text('p',`Picked WCS point: ${point.map(v=>number(v,3)).join(', ')} mm`,'coordinate-pill'));
-  el('selection').append(text('pre',JSON.stringify(span||selected,null,2)));showTopology();
+  el('selection').append(text('pre',JSON.stringify(span||component||selected,null,2)));showTopology();
+  if(network.obstacles?.some(obstacle=>obstacle.id===selectedComponent)){el('obstacle-select').value=selectedComponent;showObstacleSelection();}
 }
 function showMeasurement() {
   if(measurementPoints.length===2){const [a,b]=measurementPoints,delta=b.map((v,i)=>v-a[i]);el('measurement').textContent=`Point-to-point distance ${number(Math.hypot(...delta),3)} mm · ΔX ${number(delta[0],3)} · ΔY ${number(delta[1],3)} · ΔZ ${number(delta[2],3)} mm. Measured picked global coordinates; not a certified surface clearance.`;}
@@ -213,7 +286,7 @@ function obstacleTrace(obstacle) {
 function capsuleMesh(segments,color,name){
   // Global-coordinate capsule surfaces, including hemispherical ends. Radial
   // tessellation affects appearance only; the server validates analytic volumes.
-  const x=[],y=[],z=[],ii=[],jj=[],kk=[],detail=8;
+  const x=[],y=[],z=[],ii=[],jj=[],kk=[],customdata=[],hover=[],detail=segments.length>1000?6:8;
   const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
   for(const segment of segments){
     const a=segment.start,b=segment.end,r=segment.radius,delta=b.map((v,i)=>v-a[i]),length=Math.hypot(...delta);
@@ -221,18 +294,24 @@ function capsuleMesh(segments,color,name){
     const axis=length>0?delta.map(v=>v/length):[0,0,1],raw=cross(axis,Math.abs(axis[2])<.9?[0,0,1]:[0,1,0]),norm=Math.hypot(...raw),u=raw.map(v=>v/norm),v=cross(axis,u);
     const rings=[[-r,0],[-r*.70710678,r*.70710678],[0,r],[length,r],[length+r*.70710678,r*.70710678],[length+r,0]],offset=x.length;
     for(const [axial,radial] of rings)for(let j=0;j<detail;j++){
-      const theta=2*Math.PI*j/detail,p=a.map((c,k)=>c+axis[k]*axial+radial*(u[k]*Math.cos(theta)+v[k]*Math.sin(theta)));x.push(p[0]);y.push(p[1]);z.push(p[2]);
+      const theta=2*Math.PI*j/detail,p=a.map((c,k)=>c+axis[k]*axial+radial*(u[k]*Math.cos(theta)+v[k]*Math.sin(theta)));x.push(p[0]);y.push(p[1]);z.push(p[2]);customdata.push(segment.owner||null);hover.push(plotText(segment.owner?.span?.id||segment.owner?.physical_component?.id||name));
     }
     for(let ring=0;ring<rings.length-1;ring++)for(let j=0;j<detail;j++){
       const a0=offset+ring*detail+j,a1=offset+ring*detail+(j+1)%detail,b0=a0+detail,b1=a1+detail;
       ii.push(a0,a0);jj.push(b0,b1);kk.push(b1,a1);
     }
   }
-  return x.length?{type:'mesh3d',x,y,z,i:ii,j:jj,k:kk,color,opacity:.72,name:plotText(name),hovertemplate:'%{x}, %{y}, %{z} mm<extra>%{fullData.name}</extra>',showlegend:true,flatshading:false}:null;
+  return x.length?{type:'mesh3d',x,y,z,i:ii,j:jj,k:kk,customdata,text:hover,color,opacity:.72,name:plotText(name),hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra>%{fullData.name}</extra>',showlegend:true,flatshading:false}:null;
+}
+function mergeMeshes(meshes,color,name){
+  const out={type:'mesh3d',x:[],y:[],z:[],i:[],j:[],k:[],customdata:[],text:[],color,name:plotText(name),showlegend:false,hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra></extra>'};
+  for(const mesh of meshes){const offset=out.x.length;for(const axis of ['x','y','z'])out[axis].push(...mesh[axis]);for(const axis of ['i','j','k'])for(const value of mesh[axis])out[axis].push(value+offset);for(let index=0;index<mesh.x.length;index++){out.customdata.push(mesh.customdata?.[index]||null);out.text.push(mesh.text?.[index]||plotText(mesh.customdata?.[index]?.id||mesh.customdata?.[index]?.physical_component?.id||name));}}
+  return out.x.length?out:null;
 }
 function showPlot() {
   if(!network || !window.Plotly)return;
-  const labels=el('show-labels').checked,result=response?.result,proposed=result?.proposed_network;
+  const renderId=++renderGeneration,started=performance.now(),labels=el('show-labels').checked,result=response?.result,proposed=result?.proposed_network;
+  for(const id of ['network-plot','network-plot-proposed'])el(id).dataset.rendering='true';
   const changed=new Set(result?.changed_span_ids||[]),isolated=el('isolate-system').value;
   const visible=span=>(isolated==='all'||span.system_id===isolated)&&(el('show-unchanged').checked||!proposed||changed.has(span.id));
   const visibleNodes=new Set((proposed||network).spans.filter(visible).flatMap(span=>[span.from_node,span.to_node]));
@@ -242,66 +321,76 @@ function showPlot() {
   clear('system-legend');
   for(const id of systemIds())if(isolated==='all'||isolated===id){const key=text('span','','system-key'),swatch=text('span','','swatch');swatch.style.setProperty('--system-color',systemColor(id));key.append(swatch,text('span',id));el('system-legend').append(key);}
   function build(kinds) {
-    const traces=[];
+    const traces=[],componentNodes=new Set();
     for(const kind of kinds){
       const net=kind==='Proposed'?proposed:result?.original_network||network;
       if(!net || !el(kind==='Original'?'show-original':'show-proposed').checked)continue;
-      const firstBySystem=new Set();
+      const spanMap=new Map(net.spans.map(span=>[span.id,span])),nodeMap=new Map(net.nodes.map(node=>[node.id,node]));
+      const groups=new Map(),labelPoints=[],inspectionPoints=[];
       for(const span of net.spans.filter(visible)){
-        const color=systemColor(span.system_id),isChanged=changed.has(span.id),selected=selectedComponent===span.id;
-        const name=`${kind} ${span.id} · ${span.system_id} · ${isChanged?'changed':'untouched'}`;
-        const line=polyline(span.points,{color: selected?'#cf8a12':color,name,metadata:{kind,span}});
-        line.line={color:selected?'#cf8a12':color,width:selected?11:kind==='Proposed'&&isChanged?8:4,dash:kind==='Original'&&proposed?'dash':'solid'};
-        line.opacity=kind==='Original'&&proposed?(split?0.85:0.4):1;
-        line.legendgroup=`${kind}:${span.system_id}`;line.showlegend=!firstBySystem.has(span.system_id);firstBySystem.add(span.system_id);line.name=plotText(`${kind} · ${span.system_id}`);traces.push(line);
-        if(labels&&(kind==='Proposed'||!proposed||split)){const midpoint=span.points[Math.floor(span.points.length/2)];traces.push({type:'scatter3d',mode:'text',x:[midpoint[0]],y:[midpoint[1]],z:[midpoint[2]],text:[plotText(`${span.id}${kind==='Proposed'&&isChanged?' • CHANGED':''} · OD ${span.outer_diameter_mm} mm`)],textposition:'top center',textfont:{size:10,color},showlegend:false,hoverinfo:'skip'});}
+        const selected=selectedComponent===span.id,color=selected?'#cf8a12':systemColor(span.system_id),state=changed.has(span.id)?'changed':'untouched',key=`${span.system_id}:${state}:${selected}`;
+        if(!groups.has(key))groups.set(key,{color,spans:[],segments:[]});groups.get(key).spans.push(span);
       }
+      for(const group of groups.values()){
+        const line={type:'scatter3d',mode:'lines',x:[],y:[],z:[],customdata:[],text:[],line:{color:group.color,width:group.spans.some(span=>selectedComponent===span.id)?10:kind==='Proposed'&&changed.has(group.spans[0].id)?8:4,dash:kind==='Original'&&proposed?'dash':'solid'},opacity:kind==='Original'&&proposed?(split ? .85 : .4):1,name:plotText(`${kind} · ${group.spans[0].system_id}`),legendgroup:`${kind}:${group.spans[0].system_id}`,showlegend:true,hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra></extra>'};
+        for(const span of group.spans){if(line.x.length){line.x.push(null);line.y.push(null);line.z.push(null);line.customdata.push(null);line.text.push('');}for(const point of span.points){line.x.push(point[0]);line.y.push(point[1]);line.z.push(point[2]);line.customdata.push({kind,span});line.text.push(plotText(`${kind} ${span.id} · ${span.system_id} · OD${span.outer_diameter_mm} mm`));}const point=span.points[Math.floor(span.points.length/2)];inspectionPoints.push({point,owner:{kind,span},label:span.id,color:group.color});if(labels&&(net.spans.length<=12||selectedComponent===span.id)&&(kind==='Proposed'||!proposed||split))labelPoints.push({point,label:`${span.id}${kind==='Proposed'&&changed.has(span.id)?' • CHANGED':''} · OD ${span.outer_diameter_mm} mm`});}
+        traces.push(line);
+      }
+      // One point trace preserves individual IDs after line/mesh batching.
+      if(inspectionPoints.length)traces.push({type:'scatter3d',mode:'markers',x:inspectionPoints.map(p=>p.point[0]),y:inspectionPoints.map(p=>p.point[1]),z:inspectionPoints.map(p=>p.point[2]),marker:{size:3,color:inspectionPoints.map(p=>p.color)},customdata:inspectionPoints.map(p=>p.owner),text:inspectionPoints.map(p=>plotText(p.label)),showlegend:false,hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra></extra>'});
+      const geometry=kind==='Proposed'?response?.geometry?.proposed:response?.geometry?.original||sourceGeometry;
       if(el('show-physical').checked){
-        const geometry=kind==='Proposed'?response?.geometry?.proposed:response?.geometry?.original||sourceGeometry;
         if(!geometry)notes.add(`${kind} physical occupancy unavailable; inspect the network again.`);
         else{
           for(const note of geometry.notes||[])notes.add(note);
-          for(const shape of geometry.spans||[]){
-            const span=net.spans.find(s=>s.id===shape.id);if(!span||!visible(span))continue;
-            const color=systemColor(span.system_id),trace=capsuleMesh(shape.segments,color,`${kind} physical ${shape.id} · catalog ${shape.catalog_status}`);
-            if(trace){trace.opacity=kind==='Original'&&proposed?(split?0.5:0.17):0.68;trace.showlegend=false;trace.customdata=trace.x.map(()=>({kind,span}));traces.push(trace);}
-            if(labels&&selectedComponent===span.id&&(kind==='Proposed'||!proposed||split))for(const fitting of shape.fittings||[])traces.push({type:'scatter3d',mode:'text',x:[fitting.intersection[0]],y:[fitting.intersection[1]],z:[fitting.intersection[2]],text:[plotText(`${fitting.id} · ${number(fitting.angle_deg)}° · R${number(fitting.radius_mm)} mm (${fitting.catalog_status})`)],textposition:'top center',textfont:{size:9,color},showlegend:false,hoverinfo:'skip'});
-          }
+          for(const shape of geometry.spans||[]){const span=spanMap.get(shape.id);if(!span||!visible(span))continue;const key=`${span.system_id}:${changed.has(span.id)?'changed':'untouched'}:${selectedComponent===span.id}`,group=groups.get(key);for(const segment of shape.segments||[])group.segments.push({...segment,owner:{kind,span}});if(labels&&selectedComponent===span.id&&(kind==='Proposed'||!proposed||split))for(const fitting of shape.fittings||[])labelPoints.push({point:fitting.intersection,label:`${fitting.id} · ${number(fitting.angle_deg)}° · R${number(fitting.radius_mm)} mm (${fitting.catalog_status})`});}
+          for(const group of groups.values()){const trace=capsuleMesh(group.segments,group.color,`${kind} · batched physical pipe / fitting envelopes`);if(trace){trace.opacity=kind==='Original'&&proposed?(split ? .5 : .17):.68;trace.showlegend=false;traces.push(trace);}}
         }
       }
+      if(el('show-components').checked&&geometry?.components){
+        const componentGroups=new Map();
+        for(const component of geometry.components){
+          const linked=component.incident_span_ids||component.span_ids||[component.span_id].filter(Boolean),position=component.position||component.center;
+          if(isolated!=='all'&&component.system_id&&component.system_id!==isolated)continue;
+          if(linked.length&&!linked.some(id=>spanMap.has(id)&&visible(spanMap.get(id))))continue;
+          if(!linked.length&&component.node_id&&!visibleNodes.has(component.node_id))continue;
+          const type=component.type||component.kind||'component',key=type,color=/flange/i.test(type)?'#a6b2ba':/valve/i.test(type)?'#ae7b31':/support|hanger/i.test(type)?'#6d8190':'#58778b';
+          if(!componentGroups.has(key))componentGroups.set(key,{color,segments:[],boxes:[],markers:[]});const group=componentGroups.get(key),owner={kind,physical_component:component};
+          componentNodes.add(component.node_id||component.source_id||component.id);
+          for(const segment of component.capsules||[])group.segments.push({...segment,radius:segment.radius??segment.radius_mm,owner});
+          if(!(component.capsules||[]).length&&component.min&&component.max){const box=obstacleTrace({...component,id:component.id,kind:type});box.customdata=box.x.map(()=>owner);group.boxes.push(box);}
+          if(position)group.markers.push({point:position,owner,label:`${component.id} · ${type} · ${component.status||'UNVERIFIED'}`});
+        }
+        for(const [type,group] of componentGroups){const mesh=capsuleMesh(group.segments,group.color,`${kind} · ${type} envelopes`);if(mesh){mesh.opacity=kind==='Original'&&proposed?(split ? .6 : .2):.85;mesh.showlegend=false;traces.push(mesh);}const boxes=mergeMeshes(group.boxes,group.color,`${kind} · ${type} envelopes`);if(boxes){boxes.opacity=.7;traces.push(boxes);}const points=group.markers;if(points.length)traces.push({type:'scatter3d',mode:'markers',x:points.map(p=>p.point[0]),y:points.map(p=>p.point[1]),z:points.map(p=>p.point[2]),marker:{size:3,color:group.color},customdata:points.map(p=>p.owner),text:points.map(p=>plotText(p.label)),showlegend:false,hovertemplate:'%{text}<extra></extra>'});}
+      }
+      if(labelPoints.length)traces.push({type:'scatter3d',mode:'text',x:labelPoints.map(p=>p.point[0]),y:labelPoints.map(p=>p.point[1]),z:labelPoints.map(p=>p.point[2]),text:labelPoints.map(p=>plotText(p.label)),textfont:{size:10,color:'#3e6477'},textposition:'top center',showlegend:false,hoverinfo:'skip'});
       if(el('show-warnings').checked){
         const v=kind==='Original'?result?.original_validation||originalValidation:validation,markers=new Map();
-        for(const check of v?.checks||[])if(check.status==='FAIL'||check.status==='UNVERIFIED')for(const id of check.component_ids||[]){
-          const span=net.spans.find(s=>s.id===id),node=net.nodes.find(n=>n.id===id),point=span&&visible(span)?span.points[Math.floor(span.points.length/2)]:node&&visibleNodes.has(node.id)?node.position:null;
-          if(point&&(!markers.has(id)||check.status==='FAIL'))markers.set(id,{point,check,span,node});
-        }
-        for(const [id,marker] of markers){const p=marker.point;traces.push({type:'scatter3d',mode:'markers',x:[p[0]],y:[p[1]],z:[p[2]],marker:{size:7,color:marker.check.status==='FAIL'?'#ca453e':'#d5a52a',symbol:'diamond'},name:plotText(`${marker.check.status} · ${id}`),text:[plotText(`${marker.check.id}: ${marker.check.message}`)],customdata:[marker.span?{kind,span:marker.span}:marker.node],showlegend:false,hovertemplate:'%{text}<extra></extra>'});}
+        for(const check of v?.checks||[])if(check.status==='FAIL'||check.status==='UNVERIFIED')for(const id of check.component_ids||[]){const span=spanMap.get(id),node=nodeMap.get(id),point=span&&visible(span)?span.points[Math.floor(span.points.length/2)]:node&&visibleNodes.has(node.id)?node.position:null;if(point&&(!markers.has(id)||check.status==='FAIL'))markers.set(id,{point,check,span,node});}
+        for(const status of ['FAIL','UNVERIFIED']){const values=[...markers.values()].filter(marker=>marker.check.status===status);if(values.length)traces.push({type:'scatter3d',mode:'markers',x:values.map(m=>m.point[0]),y:values.map(m=>m.point[1]),z:values.map(m=>m.point[2]),marker:{size:status==='FAIL'?7:5,color:status==='FAIL'?'#ca453e':'#d5a52a',symbol:'diamond'},name:plotText(`${kind} · ${status}`),text:values.map(m=>plotText(`${m.check.id}: ${m.check.message}`)),customdata:values.map(m=>m.span?{kind,span:m.span}:m.node),showlegend:false,hovertemplate:'%{text}<extra></extra>'});}
       }
     }
-    const net=kinds.includes('Proposed')&&proposed?proposed:result?.original_network||network;
-    const nodes=net.nodes.filter(node=>visibleNodes.has(node.id));
-    if(el('show-physical').checked)for(const node of nodes){const radius=node.dimensions?.body_radius_mm;if(Number.isFinite(radius)&&radius>0){const trace=capsuleMesh([{start:node.position,end:node.position,radius}],'#366a8d',`${node.id} declared body R${radius} mm`);if(trace){trace.opacity=.35;trace.showlegend=false;trace.customdata=trace.x.map(()=>node);traces.push(trace);}}}
-    for(const fixed of [true,false]){const ns=nodes.filter(n=>n.fixed===fixed);if(!ns.length)continue;traces.push({type:'scatter3d',mode:labels?'markers+text':'markers',x:ns.map(n=>n.position[0]),y:ns.map(n=>n.position[1]),z:ns.map(n=>n.position[2]),text:ns.map(n=>plotText(`${n.id} (${n.type})`)),textposition:'bottom center',textfont:{size:10},marker:{size:fixed?5:6,color:fixed?'#126ca0':'#a44bad',symbol:fixed?'diamond':'circle'},name:fixed?'Fixed ports':'Permitted movable components',customdata:ns,hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra></extra>'});}
-    if(el('show-context').checked)for(const obstacle of network.obstacles||[]){const trace=obstacleTrace(obstacle);if(trace){trace.opacity=Number(el('context-opacity').value)/100;traces.push(trace);}}
+    const net=kinds.includes('Proposed')&&proposed?proposed:result?.original_network||network,nodes=net.nodes.filter(node=>visibleNodes.has(node.id));
+    if(el('show-physical').checked){const segments=nodes.filter(node=>!componentNodes.has(node.id)&&node.dimensions?.body_radius_mm>0).map(node=>({start:node.position,end:node.position,radius:node.dimensions.body_radius_mm,owner:node})),mesh=capsuleMesh(segments,'#366a8d','Declared connection body envelopes');if(mesh){mesh.opacity=.35;mesh.showlegend=false;traces.push(mesh);}}
+    for(const fixed of [true,false]){const ns=nodes.filter(n=>n.fixed===fixed);if(!ns.length)continue;traces.push({type:'scatter3d',mode:labels&&nodes.length<=36?'markers+text':'markers',x:ns.map(n=>n.position[0]),y:ns.map(n=>n.position[1]),z:ns.map(n=>n.position[2]),text:ns.map(n=>plotText(`${n.id} (${n.type})`)),textposition:'bottom center',textfont:{size:10},marker:{size:fixed?4:5,color:fixed?'#126ca0':'#a44bad',symbol:fixed?'diamond':'circle'},name:fixed?'Fixed ports':'Permitted movable components',customdata:ns,hovertemplate:'%{text}<br>%{x}, %{y}, %{z} mm<extra></extra>'});}
+    if(el('show-context').checked){const groups=new Map();for(const obstacle of network.obstacles||[]){const selected=selectedComponent===obstacle.id,key=selected?'selected':obstacle.kind||obstacle.type||'obstacle';if(!groups.has(key))groups.set(key,[]);const trace=obstacleTrace(obstacle);if(trace)groups.get(key).push(trace);}for(const [kind,meshes] of groups){const merged=mergeMeshes(meshes,kind==='selected'?'#d78c28':kind==='pipe'?'#ad69b7':'#587789',`Environment · ${kind}`);if(merged){merged.opacity=kind==='selected'?Math.max(.35,Number(el('context-opacity').value)/100):Number(el('context-opacity').value)/100;traces.push(merged);}}}
     if(measurementPoints.length){const line=polyline(measurementPoints,{color:'#d73e8b',name:'WCS measurement'});line.mode='lines+markers';line.marker={size:6,color:'#d73e8b'};line.showlegend=false;traces.push(line);}
     return traces;
   }
   function render(id,traces){
-    const plot=el(id),axis=title=>({title,gridcolor:'#dfebef',zerolinecolor:'#acc0ca',backgroundcolor:'#f8fafb',showbackground:true});
-    const layout={margin:{l:0,r:0,t:25,b:10},paper_bgcolor:'#fff',scene:{domain:{x:[.02,.98],y:[.08,.93]},aspectmode:'data',xaxis:axis('Global WCS X (mm)'),yaxis:axis('Global WCS Y (mm)'),zaxis:axis('Global WCS Z (mm)')},legend:{orientation:'h',x:0,y:1,font:{size:10}},uirevision:`${network.id}:${network.drawing.revision}`};
-    if(cameraPreset)layout.scene.camera=cameraPreset;
+    const plot=el(id),ranges=['x','y','z'].map(key=>{let low=Infinity,high=-Infinity;for(const trace of traces)for(const value of trace[key]||[])if(Number.isFinite(value)){low=Math.min(low,value);high=Math.max(high,value);}return Number.isFinite(low)?[low,high]:[-1,1];});
+    const longest=Math.max(...ranges.map(range=>range[1]-range[0]),1);
+    const axis=(title,index)=>{const range=ranges[index],padding=Math.max((range[1]-range[0])*.055,longest*.005,1);return {title,range:[range[0]-padding,range[1]+padding],autorange:false,nticks:5,tickfont:{size:10},tickformat:'~s',gridcolor:'#dfebef',zerolinecolor:'#acc0ca',backgroundcolor:'#f8fafb',showbackground:true};};
+    const layout={margin:{l:0,r:0,t:25,b:10},paper_bgcolor:'#fff',scene:{domain:{x:[.02,.98],y:[.08,.93]},aspectmode:'data',xaxis:axis('Global WCS X (mm)',0),yaxis:axis('Global WCS Y (mm)',1),zaxis:axis('Global WCS Z (mm)',2)},legend:{orientation:'h',x:0,y:1,font:{size:10}},uirevision:`${network.id}:${network.drawing.revision}`};
+    layout.scene.camera=cameraPreset||{eye:{x:.3,y:-3.2,z:1.9},up:{x:0,y:0,z:1}};
     Promise.resolve(Plotly.react(plot,traces,layout,{responsive:true,displaylogo:false})).then(()=>{
-      plot.removeAllListeners?.('plotly_click');
-      plot.on?.('plotly_click',event=>{
-        const point=event.points[0];if(!point)return;const xyz=[Number(point.x),Number(point.y),Number(point.z)];
-        if(measuring&&xyz.every(Number.isFinite)){measurementPoints.push(xyz);if(measurementPoints.length===2)measuring=false;showMeasurement();showPlot();}
-        if(point.customdata)inspectComponent(point.customdata,xyz);
-      });
+      if(renderId!==renderGeneration)return;
+      plot.dataset.rendering='false';const stats={network_id:network.id,spans:network.spans.filter(visible).length,components:(sourceGeometry?.components||[]).length,traces:traces.length,mesh_vertices:traces.filter(t=>t.type==='mesh3d').reduce((sum,t)=>sum+t.x.length,0),elapsed_ms:performance.now()-started};plot.dataset.renderStats=JSON.stringify(stats);if(id==='network-plot')el('render-stats').textContent=`${stats.spans} visible spans · ${stats.components} declared components · ${stats.traces} batched traces · ${number(stats.mesh_vertices,0)} mesh vertices · ${number(stats.elapsed_ms/1000,2)} s last render. IDs remain selectable; larger networks show labels on inspection.`;
+      plot.removeAllListeners?.('plotly_click');plot.on?.('plotly_click',event=>{const point=event.points[0];if(!point)return;const xyz=[Number(point.x),Number(point.y),Number(point.z)];if(measuring&&xyz.every(Number.isFinite)){measurementPoints.push(xyz);if(measurementPoints.length===2)measuring=false;showMeasurement();showPlot();}if(point.customdata)inspectComponent(point.customdata,xyz);});
     }).catch(e=>error(`3D viewport: ${e.message}`));
   }
-  render('network-plot',build(split?['Original']:['Original','Proposed']));
-  if(split)render('network-plot-proposed',build(['Proposed']));
-  el('geometry-notes').textContent=el('show-physical').checked?['Physical envelopes use conservative validation geometry; tessellated surfaces approximate analytic volumes.',...notes].join(' '):'Centerline view. Enable physical envelopes to display declared diameters and swept fitting occupancy.';
+  render('network-plot',build(split?['Original']:['Original','Proposed']));if(split)render('network-plot-proposed',build(['Proposed']));
+  el('geometry-notes').textContent=el('show-physical').checked?['Physical pipe, fitting and component envelopes use declared dimensions and conservative validation geometry. Tessellated surfaces are visual approximations; catalog and installation evidence remain separately reviewed.',...notes].join(' '):'Centerline view. Enable physical envelopes to display declared diameters and swept fitting occupancy.';
 }
 function showCoordinates() {
   clear('coordinates');if(!network)return;
@@ -311,6 +400,14 @@ function showCoordinates() {
     for(const label of ['Span / CAD handle','System / endpoints','Point','X (mm)','Y (mm)','Z (mm)'])head.append(text('th',label));table.append(head);
     for(const span of net.spans)span.points.forEach((point,i)=>{const row=document.createElement('tr');for(const value of [`${span.id} / ${span.cad_handle || 'UNVERIFIED'}`,`${span.system_id} / ${span.from_node} → ${span.to_node}`,i,...point])row.append(text('td',String(value)));table.append(row);});wrap.append(table);el('coordinates').append(wrap);
   }
+}
+function showSearchProgress(progress) {
+  if(!progress)return;
+  el('search-progress').dataset.actual=JSON.stringify(progress);
+  el('progress-phase').textContent=String(progress.phase||'running').replaceAll('_',' ');
+  el('progress-evaluations').textContent=progress.evaluations===undefined?'—':`${progress.evaluations} / ${progress.max_evaluations??'—'}`;
+  el('progress-neighborhoods').textContent=progress.completed_neighborhoods===undefined?'—':`${progress.completed_neighborhoods} / ${progress.total_neighborhoods??'—'}`;
+  el('progress-nodes').textContent=number(progress.expanded_states??progress.expanded_nodes??progress.nodes_expanded??progress.search_nodes_expanded,0);
 }
 async function optimize() {
   if(!network)throw new Error('Load a network first.');
@@ -323,27 +420,32 @@ async function optimize() {
   response=null;validation=originalValidation;el('approve').checked=false;el('export').disabled=true;clear('downloads');showValidation();showPlot();showCopilot();showCoordinates();
   el('outcome').textContent='COORDINATED SEARCH';delete el('outcome').dataset.status;
   el('review-state').textContent='Calculation in progress. Review the completed result before generating new instructions.';
-  const lockedControls=[...document.querySelectorAll('#selection-scope,#strategy,#evaluations,#max-seconds,#load-example,#network-file,#apply-json,#inspect-cad,#validate,#system-selection input,#span-selection input')];
+  const lockedControls=[...document.querySelectorAll('#selection-scope,#strategy,#evaluations,#max-seconds,#load-example,#network-file,#apply-json,#inspect-cad,#validate,#system-selection input,#span-selection input,#compartment-selection input')];
   for(const control of lockedControls){control.dataset.previousDisabled=String(control.disabled);control.disabled=true;}
   el('optimize').disabled=true;el('cancel').hidden=false;el('progress').textContent='Running coordinated network evaluations…';
-  const started=performance.now();
+  const started=performance.now();let submittedJobId=null;
+  el('search-conclusion').textContent='';el('progress-phase').textContent='Submitting';for(const id of ['progress-evaluations','progress-neighborhoods','progress-nodes'])el(id).textContent='—';
   try {
-    const job=await api('jobs',{network:requested,max_evaluations:budget,max_seconds:maxSeconds,strategy:el('strategy').value,...selection});jobId=job.id;
+    const job=await api('jobs',{network:requested,max_evaluations:budget,max_seconds:maxSeconds,strategy:el('strategy').value,...selection});submittedJobId=job.id;
+    if(generation!==localGeneration){await api(`jobs/${job.id}/cancel`,{});return;}jobId=job.id;
     if(cancelRequested)await api(`jobs/${jobId}/cancel`,{});
     while(true){
       await new Promise(resolve=>setTimeout(resolve,300));const state=await api(`jobs/${job.id}`);
+      if(generation!==localGeneration)return;
+      showSearchProgress(state.progress);
       if(state.status==='failed')throw new Error(state.error || 'Calculation failed.');
       if(state.status==='cancelled'){el('outcome').textContent='CANCELLED';el('review-state').textContent='Calculation cancelled. The original network is preserved; no new review bundle is available.';el('progress').textContent='Calculation cancelled; source network preserved.';return;}
       if(state.status!=='complete')el('progress').textContent=`${cancelRequested?'Cancellation requested':'Coordinated search running'} · ${number((performance.now()-started)/1000,1)} s elapsed · bounded to ${budget} network evaluations.`;
       if(state.status==='complete'){
         if(generation !== localGeneration){el('progress').textContent='Network changed during calculation; stale result discarded.';return;}
         response=state.response;validation=response.result.validation;el('outcome').textContent=response.result.status;el('outcome').dataset.status=response.result.status;el('progress').textContent=`Completed in ${number(state.elapsed_seconds,3)} s · ${response.result.search?.evaluations ?? response.result.search?.evaluated ?? 'bounded'} evaluations`;
+        const search=response.result.search||{};el('search-conclusion').textContent=search.time_budget_reached?'Search time limit reached. This is a bounded-search result, not proof of infeasibility or optimality.':search.evaluation_budget_reached?'Evaluation limit reached. Any accepted proposal passed whole-network checks; exhausted search is not proof of infeasibility.':search.termination_reason==='BLOCKED_METADATA'?'Search blocked by missing or unresolved engineering metadata. No infeasibility proof is implied.':'Bounded search finished. Global optimality and continuous infeasibility are not proven.';
         el('review-state').textContent=`Proposal ${response.result.proposal_id || 'unchanged result'} · drawing revision ${network.drawing.revision}. Review exact coordinates and every unresolved check.`;
         el('approve').checked=false;el('export').disabled=true;showValidation();showPlot();showCoordinates();showCopilot();showTopology();break;
       }
     }
   } catch(e) {el('outcome').textContent='CALCULATION FAILED';throw e;}
-  finally {jobId=null;el('optimize').disabled=false;el('cancel').hidden=true;for(const control of lockedControls)control.disabled=control.dataset.previousDisabled==='true';}
+  finally {if(!jobId||jobId===submittedJobId){jobId=null;el('optimize').disabled=editingEnvironment;el('cancel').hidden=true;for(const control of lockedControls)control.disabled=control.dataset.previousDisabled==='true';}}
 }
 el('load-example').onclick=guard(async()=>loadNetwork(await api(`examples/${encodeURIComponent(el('example').value)}`)));
 el('network-file').onchange=guard(async()=>{const file=el('network-file').files[0];if(file){if(file.size>2*1024*1024)throw new Error('Network JSON exceeds 2 MB.');let raw;try{raw=JSON.parse(await file.text());}catch{throw new Error('This file is not valid JSON. Export a PipeForge engineering network JSON and try again.');}await loadNetwork(raw.network || raw.original_network || raw);}});
@@ -354,11 +456,15 @@ el('optimize').onclick=guard(optimize);
 el('cancel').onclick=guard(async()=>{cancelRequested=true;el('progress').textContent='Cancellation requested…';if(jobId)await api(`jobs/${jobId}/cancel`,{});});
 el('validate').onclick=guard(async()=>{if(!network)throw new Error('Load a network first.');validation=(await api('validate',{network:response?.result?.proposed_network || network,reference:response ? network : undefined})).validation;showValidation();el('progress').textContent='Independent network validation complete.';});
 el('check-filter').onchange=showValidation;
-for(const id of ['show-original','show-proposed','show-context','show-labels','show-physical','show-unchanged','show-warnings','comparison-mode','isolate-system'])el(id).onchange=showPlot;
+for(const id of ['show-original','show-proposed','show-context','show-labels','show-physical','show-components','show-unchanged','show-warnings','comparison-mode','isolate-system'])el(id).onchange=showPlot;
+el('obstacle-select').onchange=()=>{showObstacleSelection();selectedComponent=el('obstacle-select').value||null;showPlot();};
+for(const action of ['add','move','remove'])el(`obstacle-${action}`).onclick=guard(()=>editObstacle(action));
+el('optimize-affected').onclick=guard(async()=>{if(!environmentChange)throw new Error('Apply an environment edit first.');el('selection-scope').value='spans';const affected=new Set(environmentChange.affected_span_ids||[]);for(const input of el('span-selection').querySelectorAll('input'))input.checked=!input.disabled&&affected.has(input.value);settingsChanged();await optimize();});
 for(const id of ['selection-scope','strategy','evaluations','max-seconds'])el(id).onchange=settingsChanged;
 el('context-opacity').oninput=()=>{el('opacity-value').textContent=`${el('context-opacity').value}%`;showPlot();};
-const cameras={iso:{eye:{x:1.5,y:1.5,z:1.15},up:{x:0,y:0,z:1}},top:{eye:{x:0,y:0,z:2.2},up:{x:0,y:1,z:0},projection:{type:'orthographic'}},front:{eye:{x:0,y:-2.2,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}},side:{eye:{x:2.2,y:0,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}}};
-for(const button of document.querySelectorAll('[data-camera]'))button.onclick=()=>{cameraPreset=cameras[button.dataset.camera];for(const id of ['network-plot','network-plot-proposed'])if(el(id).data)Plotly.relayout(el(id),{'scene.camera':cameraPreset});};
+const cameras={iso:{eye:{x:.3,y:-3.2,z:1.9},up:{x:0,y:0,z:1}},top:{eye:{x:0,y:0,z:2.2},up:{x:0,y:1,z:0},projection:{type:'orthographic'}},front:{eye:{x:0,y:-2.2,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}},side:{eye:{x:2.2,y:0,z:0},up:{x:0,y:0,z:1},projection:{type:'orthographic'}}};
+// A fresh GL scene avoids Plotly camera-relayout dropping global-coordinate meshes.
+for(const button of document.querySelectorAll('[data-camera]'))button.onclick=()=>{cameraPreset=cameras[button.dataset.camera];for(const id of ['network-plot','network-plot-proposed'])if(el(id).data)Plotly.purge(el(id));showPlot();};
 el('measure-start').onclick=()=>{measuring=true;measurementPoints=[];showMeasurement();showPlot();};
 el('measure-clear').onclick=()=>{measuring=false;measurementPoints=[];showMeasurement();showPlot();};
 el('approve').onchange=()=>el('export').disabled=!(el('approve').checked && response?.review_token);

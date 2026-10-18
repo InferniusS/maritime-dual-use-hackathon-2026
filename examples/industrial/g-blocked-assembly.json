@@ -1,0 +1,1961 @@
+{
+  "schema_version": "pipeforge.network/4.0",
+  "id": "g-blocked-assembly",
+  "title": "G · Connected assembly behind a sealed bulkhead",
+  "description": "A solid full-cross-section bulkhead separates the upstream fixed equipment port from the twenty-run connected assembly. Partial downstream improvements cannot be accepted while the complete network fails. Report bounded unsuccessful search separately from timeout; neither is a general infeasibility proof.",
+  "provenance": "synthetic",
+  "units": "mm",
+  "drawing": {
+    "id": "SYNTHETIC-V51-G-BLOCKED-ASSEMBLY",
+    "revision": "synthetic-v51-1"
+  },
+  "coordinate_system": {
+    "frame": "WCS",
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "fore_aft": [
+      1,
+      0,
+      0
+    ],
+    "athwartship": [
+      0,
+      1,
+      0
+    ]
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      16500,
+      9000,
+      4000
+    ]
+  },
+  "systems": [
+    {
+      "id": "cooling",
+      "type": "pressurized"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "equipment-in",
+      "type": "equipment_port",
+      "position": [
+        500,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-EQUIPMENT-IN",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 180
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "main-01": 80
+        },
+        "port_outer_diameters_mm": {
+          "main-01": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "equipment-out",
+      "type": "equipment_port",
+      "position": [
+        15000,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-EQUIPMENT-OUT",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 180
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "main-08": 80
+        },
+        "port_outer_diameters_mm": {
+          "main-08": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-01-tee",
+      "type": "tee",
+      "position": [
+        3000,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-01-TEE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 260
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-01-feed": 50,
+          "main-01": 80,
+          "main-02": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-01-feed": 60,
+          "main-01": 100,
+          "main-02": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-01-valve",
+      "type": "valve",
+      "position": [
+        3000,
+        4500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-01-VALVE",
+      "instance_path": [],
+      "nominal_diameter_mm": 50,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 100,
+        "body_length_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-01-feed": 50,
+          "branch-01-reducer-inlet": 50
+        },
+        "port_outer_diameters_mm": {
+          "branch-01-feed": 60,
+          "branch-01-reducer-inlet": 60
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "branch-01-reducer",
+      "type": "reducer",
+      "position": [
+        3000,
+        6000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-01-REDUCER",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 250
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-01-reducer-inlet": 50,
+          "branch-01-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-01-reducer-inlet": 60,
+          "branch-01-flanged-outlet": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-01-flange",
+      "type": "flange",
+      "position": [
+        3000,
+        7500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-01-FLANGE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 120
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "installation_clearance_mm": 25,
+        "external_assembly_boundary": true,
+        "mating_component_status": "UNVERIFIED",
+        "port_nominal_diameters_mm": {
+          "branch-01-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-01-flanged-outlet": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-02-tee",
+      "type": "tee",
+      "position": [
+        6000,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-02-TEE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 260
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-02-feed": 50,
+          "main-02": 80,
+          "main-03": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-02-feed": 60,
+          "main-02": 100,
+          "main-03": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-02-valve",
+      "type": "valve",
+      "position": [
+        6000,
+        4500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-02-VALVE",
+      "instance_path": [],
+      "nominal_diameter_mm": 50,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 100,
+        "body_length_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-02-feed": 50,
+          "branch-02-reducer-inlet": 50
+        },
+        "port_outer_diameters_mm": {
+          "branch-02-feed": 60,
+          "branch-02-reducer-inlet": 60
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "branch-02-reducer",
+      "type": "reducer",
+      "position": [
+        6000,
+        6000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-02-REDUCER",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 250
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-02-reducer-inlet": 50,
+          "branch-02-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-02-reducer-inlet": 60,
+          "branch-02-flanged-outlet": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-02-flange",
+      "type": "flange",
+      "position": [
+        6000,
+        7500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-02-FLANGE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 120
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "installation_clearance_mm": 25,
+        "external_assembly_boundary": true,
+        "mating_component_status": "UNVERIFIED",
+        "port_nominal_diameters_mm": {
+          "branch-02-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-02-flanged-outlet": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-03-tee",
+      "type": "tee",
+      "position": [
+        9000,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-03-TEE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 260
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-03-feed": 50,
+          "main-03": 80,
+          "main-04": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-03-feed": 60,
+          "main-03": 100,
+          "main-04": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-03-valve",
+      "type": "valve",
+      "position": [
+        9000,
+        4500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-03-VALVE",
+      "instance_path": [],
+      "nominal_diameter_mm": 50,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 100,
+        "body_length_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-03-feed": 50,
+          "branch-03-reducer-inlet": 50
+        },
+        "port_outer_diameters_mm": {
+          "branch-03-feed": 60,
+          "branch-03-reducer-inlet": 60
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "branch-03-reducer",
+      "type": "reducer",
+      "position": [
+        9000,
+        6000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-03-REDUCER",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 250
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-03-reducer-inlet": 50,
+          "branch-03-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-03-reducer-inlet": 60,
+          "branch-03-flanged-outlet": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-03-flange",
+      "type": "flange",
+      "position": [
+        9000,
+        7500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-03-FLANGE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 120
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "installation_clearance_mm": 25,
+        "external_assembly_boundary": true,
+        "mating_component_status": "UNVERIFIED",
+        "port_nominal_diameters_mm": {
+          "branch-03-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-03-flanged-outlet": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-04-tee",
+      "type": "tee",
+      "position": [
+        12000,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-04-TEE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 260
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-04-feed": 50,
+          "main-04": 80,
+          "main-05": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-04-feed": 60,
+          "main-04": 100,
+          "main-05": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-04-valve",
+      "type": "valve",
+      "position": [
+        12000,
+        4500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-04-VALVE",
+      "instance_path": [],
+      "nominal_diameter_mm": 50,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 100,
+        "body_length_mm": 200
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-04-feed": 50,
+          "branch-04-reducer-inlet": 50
+        },
+        "port_outer_diameters_mm": {
+          "branch-04-feed": 60,
+          "branch-04-reducer-inlet": 60
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "branch-04-reducer",
+      "type": "reducer",
+      "position": [
+        12000,
+        6000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-04-REDUCER",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 250
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "branch-04-reducer-inlet": 50,
+          "branch-04-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-04-reducer-inlet": 60,
+          "branch-04-flanged-outlet": 100
+        },
+        "reducer_approved": true,
+        "reducer_source": "Explicit synthetic designer permission for the supplied reducing component; commercial approval unverified"
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-04-flange",
+      "type": "flange",
+      "position": [
+        12000,
+        7500,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-BRANCH-04-FLANGE",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        0,
+        1,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 140,
+        "body_length_mm": 120
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "installation_clearance_mm": 25,
+        "external_assembly_boundary": true,
+        "mating_component_status": "UNVERIFIED",
+        "port_nominal_diameters_mm": {
+          "branch-04-flanged-outlet": 80
+        },
+        "port_outer_diameters_mm": {
+          "branch-04-flanged-outlet": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic"
+    },
+    {
+      "id": "main-inline-valve-1",
+      "type": "valve",
+      "position": [
+        12750.0,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-MAIN-INLINE-VALVE-1",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 180
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "main-05": 80,
+          "main-06": 80
+        },
+        "port_outer_diameters_mm": {
+          "main-05": 100,
+          "main-06": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "main-inline-valve-2",
+      "type": "valve",
+      "position": [
+        13500.0,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-MAIN-INLINE-VALVE-2",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 180
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "main-06": 80,
+          "main-07": 80
+        },
+        "port_outer_diameters_mm": {
+          "main-06": 100,
+          "main-07": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    },
+    {
+      "id": "main-inline-valve-3",
+      "type": "valve",
+      "position": [
+        14250.0,
+        2000,
+        1500
+      ],
+      "system_id": "cooling",
+      "fixed": true,
+      "cad_handle": "SYN51-MAIN-INLINE-VALVE-3",
+      "instance_path": [],
+      "nominal_diameter_mm": 80,
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "dimensions": {
+        "body_radius_mm": 110,
+        "body_length_mm": 180
+      },
+      "constraints": {
+        "contact_radius_mm": 250,
+        "port_nominal_diameters_mm": {
+          "main-07": 80,
+          "main-08": 80
+        },
+        "port_outer_diameters_mm": {
+          "main-07": 100,
+          "main-08": 100
+        }
+      },
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true
+      },
+      "provenance": "synthetic",
+      "stem_orientation": "horizontal",
+      "stem_height_mm": 1500
+    }
+  ],
+  "spans": [
+    {
+      "id": "branch-01-feed",
+      "from_node": "branch-01-tee",
+      "to_node": "branch-01-valve",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-01-FEED",
+      "instance_path": [],
+      "points": [
+        [
+          3000,
+          2000,
+          1500
+        ],
+        [
+          3000,
+          2600,
+          1500
+        ],
+        [
+          3600,
+          2600,
+          1500
+        ],
+        [
+          3600,
+          3900,
+          1500
+        ],
+        [
+          3000,
+          3900,
+          1500
+        ],
+        [
+          3000,
+          4500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-01-reducer-inlet",
+      "from_node": "branch-01-valve",
+      "to_node": "branch-01-reducer",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-01-REDUCER-INLET",
+      "instance_path": [],
+      "points": [
+        [
+          3000,
+          4500,
+          1500
+        ],
+        [
+          3000,
+          6000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-01-flanged-outlet",
+      "from_node": "branch-01-reducer",
+      "to_node": "branch-01-flange",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-01-FLANGED-OUTLET",
+      "instance_path": [],
+      "points": [
+        [
+          3000,
+          6000,
+          1500
+        ],
+        [
+          3000,
+          7500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-02-feed",
+      "from_node": "branch-02-tee",
+      "to_node": "branch-02-valve",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-02-FEED",
+      "instance_path": [],
+      "points": [
+        [
+          6000,
+          2000,
+          1500
+        ],
+        [
+          6000,
+          2600,
+          1500
+        ],
+        [
+          6600,
+          2600,
+          1500
+        ],
+        [
+          6600,
+          3900,
+          1500
+        ],
+        [
+          6000,
+          3900,
+          1500
+        ],
+        [
+          6000,
+          4500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-02-reducer-inlet",
+      "from_node": "branch-02-valve",
+      "to_node": "branch-02-reducer",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-02-REDUCER-INLET",
+      "instance_path": [],
+      "points": [
+        [
+          6000,
+          4500,
+          1500
+        ],
+        [
+          6000,
+          6000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-02-flanged-outlet",
+      "from_node": "branch-02-reducer",
+      "to_node": "branch-02-flange",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-02-FLANGED-OUTLET",
+      "instance_path": [],
+      "points": [
+        [
+          6000,
+          6000,
+          1500
+        ],
+        [
+          6000,
+          7500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-03-feed",
+      "from_node": "branch-03-tee",
+      "to_node": "branch-03-valve",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-03-FEED",
+      "instance_path": [],
+      "points": [
+        [
+          9000,
+          2000,
+          1500
+        ],
+        [
+          9000,
+          2600,
+          1500
+        ],
+        [
+          9600,
+          2600,
+          1500
+        ],
+        [
+          9600,
+          3900,
+          1500
+        ],
+        [
+          9000,
+          3900,
+          1500
+        ],
+        [
+          9000,
+          4500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-03-reducer-inlet",
+      "from_node": "branch-03-valve",
+      "to_node": "branch-03-reducer",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-03-REDUCER-INLET",
+      "instance_path": [],
+      "points": [
+        [
+          9000,
+          4500,
+          1500
+        ],
+        [
+          9000,
+          6000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-03-flanged-outlet",
+      "from_node": "branch-03-reducer",
+      "to_node": "branch-03-flange",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-03-FLANGED-OUTLET",
+      "instance_path": [],
+      "points": [
+        [
+          9000,
+          6000,
+          1500
+        ],
+        [
+          9000,
+          7500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-04-feed",
+      "from_node": "branch-04-tee",
+      "to_node": "branch-04-valve",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-04-FEED",
+      "instance_path": [],
+      "points": [
+        [
+          12000,
+          2000,
+          1500
+        ],
+        [
+          12000,
+          2600,
+          1500
+        ],
+        [
+          12600,
+          2600,
+          1500
+        ],
+        [
+          12600,
+          3900,
+          1500
+        ],
+        [
+          12000,
+          3900,
+          1500
+        ],
+        [
+          12000,
+          4500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-04-reducer-inlet",
+      "from_node": "branch-04-valve",
+      "to_node": "branch-04-reducer",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-04-REDUCER-INLET",
+      "instance_path": [],
+      "points": [
+        [
+          12000,
+          4500,
+          1500
+        ],
+        [
+          12000,
+          6000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 60,
+      "nominal_diameter_mm": 50,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 200,
+        "body_radius_mm": 35.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "branch-04-flanged-outlet",
+      "from_node": "branch-04-reducer",
+      "to_node": "branch-04-flange",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-BRANCH-04-FLANGED-OUTLET",
+      "instance_path": [],
+      "points": [
+        [
+          12000,
+          6000,
+          1500
+        ],
+        [
+          12000,
+          7500,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-01",
+      "from_node": "equipment-in",
+      "to_node": "branch-01-tee",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-01",
+      "instance_path": [],
+      "points": [
+        [
+          500,
+          2000,
+          1500
+        ],
+        [
+          3000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-02",
+      "from_node": "branch-01-tee",
+      "to_node": "branch-02-tee",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-02",
+      "instance_path": [],
+      "points": [
+        [
+          3000,
+          2000,
+          1500
+        ],
+        [
+          6000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-03",
+      "from_node": "branch-02-tee",
+      "to_node": "branch-03-tee",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-03",
+      "instance_path": [],
+      "points": [
+        [
+          6000,
+          2000,
+          1500
+        ],
+        [
+          9000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-04",
+      "from_node": "branch-03-tee",
+      "to_node": "branch-04-tee",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-04",
+      "instance_path": [],
+      "points": [
+        [
+          9000,
+          2000,
+          1500
+        ],
+        [
+          12000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-05",
+      "from_node": "branch-04-tee",
+      "to_node": "main-inline-valve-1",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-05",
+      "instance_path": [],
+      "points": [
+        [
+          12000,
+          2000,
+          1500
+        ],
+        [
+          12750.0,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-06",
+      "from_node": "main-inline-valve-1",
+      "to_node": "main-inline-valve-2",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-06",
+      "instance_path": [],
+      "points": [
+        [
+          12750.0,
+          2000,
+          1500
+        ],
+        [
+          13500.0,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-07",
+      "from_node": "main-inline-valve-2",
+      "to_node": "main-inline-valve-3",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-07",
+      "instance_path": [],
+      "points": [
+        [
+          13500.0,
+          2000,
+          1500
+        ],
+        [
+          14250.0,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    },
+    {
+      "id": "main-08",
+      "from_node": "main-inline-valve-3",
+      "to_node": "equipment-out",
+      "system_id": "cooling",
+      "cad_handle": "SYN51-MAIN-08",
+      "instance_path": [],
+      "points": [
+        [
+          14250.0,
+          2000,
+          1500
+        ],
+        [
+          15000,
+          2000,
+          1500
+        ]
+      ],
+      "outer_diameter_mm": 100,
+      "nominal_diameter_mm": 80,
+      "modifiable": true,
+      "provenance": "synthetic",
+      "fitting_catalog": {
+        "status": "provisional",
+        "source": "Invented component dimensions for synthetic verification; no commercial or ship approval",
+        "available": true,
+        "radius_mm": 250,
+        "body_radius_mm": 55.0,
+        "angles_deg": [
+          45,
+          90
+        ]
+      },
+      "manufacturing": {
+        "planarity_required": false
+      },
+      "constraints": {}
+    }
+  ],
+  "obstacles": [
+    {
+      "id": "sealed-bulkhead",
+      "kind": "bulkhead",
+      "min": [
+        1500,
+        0,
+        0
+      ],
+      "max": [
+        1750,
+        9000,
+        4000
+      ],
+      "source_handle": "SYN51-SEALED-BULKHEAD",
+      "provenance": "synthetic"
+    }
+  ],
+  "supports": [
+    {
+      "id": "branch-01-hanger",
+      "type": "support",
+      "span_id": "branch-01-reducer-inlet",
+      "position": [
+        3000,
+        5250,
+        1800
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "dimensions": {
+        "body_radius_mm": 25,
+        "body_length_mm": 600
+      },
+      "contact_position": [
+        3000,
+        5250,
+        1500
+      ],
+      "contact_radius_mm": 200,
+      "source": "Synthetic supplied hanger envelope; actual catalog and ship anchorage unverified",
+      "conservative": true,
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-02-hanger",
+      "type": "support",
+      "span_id": "branch-02-reducer-inlet",
+      "position": [
+        6000,
+        5250,
+        1800
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "dimensions": {
+        "body_radius_mm": 25,
+        "body_length_mm": 600
+      },
+      "contact_position": [
+        6000,
+        5250,
+        1500
+      ],
+      "contact_radius_mm": 200,
+      "source": "Synthetic supplied hanger envelope; actual catalog and ship anchorage unverified",
+      "conservative": true,
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-03-hanger",
+      "type": "support",
+      "span_id": "branch-03-reducer-inlet",
+      "position": [
+        9000,
+        5250,
+        1800
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "dimensions": {
+        "body_radius_mm": 25,
+        "body_length_mm": 600
+      },
+      "contact_position": [
+        9000,
+        5250,
+        1500
+      ],
+      "contact_radius_mm": 200,
+      "source": "Synthetic supplied hanger envelope; actual catalog and ship anchorage unverified",
+      "conservative": true,
+      "provenance": "synthetic"
+    },
+    {
+      "id": "branch-04-hanger",
+      "type": "support",
+      "span_id": "branch-04-reducer-inlet",
+      "position": [
+        12000,
+        5250,
+        1800
+      ],
+      "axis": [
+        0,
+        0,
+        1
+      ],
+      "dimensions": {
+        "body_radius_mm": 25,
+        "body_length_mm": 600
+      },
+      "contact_position": [
+        12000,
+        5250,
+        1500
+      ],
+      "contact_radius_mm": 200,
+      "source": "Synthetic supplied hanger envelope; actual catalog and ship anchorage unverified",
+      "conservative": true,
+      "provenance": "synthetic"
+    }
+  ],
+  "compartments": [
+    {
+      "id": "machinery-room",
+      "min": [
+        0,
+        0,
+        0
+      ],
+      "max": [
+        16500,
+        9000,
+        4000
+      ],
+      "provenance": "synthetic"
+    }
+  ],
+  "penetrations": [],
+  "unresolved_connections": [],
+  "coverage": {
+    "complete": true,
+    "omitted_count": 0,
+    "unknown_count": 0,
+    "notes": [
+      "Complete only for this entirely invented assembly; not a ship survey."
+    ]
+  },
+  "accessibility_coverage": {
+    "complete": false
+  },
+  "standards_profile": "fincantieri-track2-user-transcription-v1",
+  "search": {
+    "grid_step_mm": 500
+  },
+  "assembly_metadata": {
+    "generator": "pipeforge.industrial_examples/5.1",
+    "declared_run_count": 20,
+    "terminal_scope": "Flanges are external assembly tie-ins. Mating equipment, bolt specification and installation sequence remain unverified.",
+    "catalog_scope": "Invented component dimensions for synthetic verification; no commercial or ship approval"
+  }
+}

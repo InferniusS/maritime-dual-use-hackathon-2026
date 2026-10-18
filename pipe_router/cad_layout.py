@@ -11,7 +11,9 @@ import math
 
 from . import core
 
-SOLID_TYPES = {"3DSOLID", "BODY", "REGION"}
+ACIS_TYPES = {"3DSOLID", "BODY", "REGION"}
+# Facets are physical unknowns, not proof of a closed solid or semantic pipe.
+SOLID_TYPES = ACIS_TYPES | {"MESH", "3DFACE", "SOLID", "TRACE", "POLYLINE"}
 THIN_BOX_PADDING_MM = 0.001
 
 
@@ -53,6 +55,7 @@ def _solid_boxes(cad):
             continue
         record = groups.setdefault(key, {
             "min": [math.inf] * 3, "max": [-math.inf] * 3,
+            "source_type": obj.get("type"),
             "source_object_count": 0, "source_point_count": 0,
         })
         for point_index, raw in enumerate(points):
@@ -83,6 +86,7 @@ def _solid_boxes(cad):
                     highs.append([v + radius for v in point])
             groups[key] = {"min": [min(p[i] for p in lows) for i in range(3)],
                            "max": [max(p[i] for p in highs) for i in range(3)],
+                           "source_type": "3DSOLID",
                            "source_object_count": 0, "source_point_count": 0}
     boxes = []
     for index, (key, record) in enumerate(groups.items()):
@@ -96,6 +100,7 @@ def _solid_boxes(cad):
                 padded_axes.append(axis)
         box = {
             "id": f"cad-solid-{index + 1}", "key": key, "min": low, "max": high,
+            "source_type": record["source_type"],
             **_instance_record(key), "source_object_count": record["source_object_count"],
             "source_point_count": record["source_point_count"], "thin_axes_padded": padded_axes,
             "obstacle_method": "sample_box",
@@ -235,7 +240,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
                   **({"capsules": deepcopy(box["capsules"])} if "capsules" in box else {})} for box in nearby]
     contacts = _endpoint_contacts(points, nearby, envelope)
     declared_solids = cad.get("counts", {}).get("solid_instances")
-    missing = max(0, declared_solids - len(all_boxes)) if isinstance(declared_solids, int) else None
+    retained_solids = sum(box["source_type"] in ACIS_TYPES for box in all_boxes)
+    missing = max(0, declared_solids - retained_solids) if isinstance(declared_solids, int) else None
     warnings = [
         "Selected candidate identity, nominal size and equipment ports remain unverified. A candidate may be a fitting or fastener.",
         "The rectangular search region is an assumed local test box. It is not the ship boundary or an approved routing space.",
@@ -263,7 +269,8 @@ def prepare_cad_layout(cad, candidate_id, system_type="pressurized", clearance=5
     counts = {
         "all_source_objects": len(cad["objects"]),
         "source_declared_solid_instances": declared_solids,
-        "solid_instances_with_extracted_geometry": len(all_boxes),
+        "solid_instances_with_extracted_geometry": retained_solids,
+        "physical_instances_with_extracted_geometry": len(all_boxes),
         "solid_instances_without_extracted_geometry": missing,
         "selected_source_instances": len(excluded),
         "excluded_selected_source_objects": sum(box["source_object_count"] for box in excluded),

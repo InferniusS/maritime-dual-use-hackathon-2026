@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../autocad-plugin/NetworkSourceBinding.cs" Link="NetworkSourceBinding.cs" />
+    <Compile Include="../../autocad-plugin/NetworkProgressStatus.cs" Link="NetworkProgressStatus.cs" />
   </ItemGroup>
 </Project>
