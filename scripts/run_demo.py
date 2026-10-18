@@ -22,7 +22,7 @@ from ezdxf import units
 import plotly.graph_objects as go
 
 from pipe_router.workflow import run_workflow
-from pipe_router.review_export import challenge_panel, write_review_xlsx
+from pipe_router.review_export import assembly_panel, challenge_panel, write_review_xlsx
 
 
 def display_layout(layout, result):
@@ -166,6 +166,75 @@ def diagnostic_text(item):
     return message + (" (" + " · ".join(details) + ")" if details else "")
 
 
+def accepted_assembly(result):
+    assembly = result.get("assembly") or {}
+    return assembly if assembly.get("status") == "ready" and result.get("candidate") else None
+
+
+def add_assembly_meshes(figure, meshes, *, name, color, opacity, group):
+    for index, mesh in enumerate(meshes):
+        points, faces = mesh["vertices"], mesh["faces"]
+        figure.add_trace(go.Mesh3d(
+            x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
+            i=[face[0] for face in faces], j=[face[1] for face in faces], k=[face[2] for face in faces],
+            color=color, opacity=opacity, name=name, showlegend=index == 0, legendgroup=group,
+            flatshading=False, meta={"assembly_component_id": mesh["id"], "geometry_type": mesh.get("geometry_type", "outer_envelope")},
+            hovertemplate=html.escape(str(mesh["id"])) + "<br>" + html.escape(name) + "<br>Geometric outer envelope<extra></extra>",
+        ))
+
+
+def print_route_svg(layout, result):
+    """A print-safe isometric centerline diagram independent of WebGL."""
+    layout = display_layout(layout, result)
+    assembly = accepted_assembly(result)
+    routes = [("Original", result["original"]["points"], "#b96313")]
+    if result.get("candidate"):
+        routes.append(("Suggested", assembly["centerline_points"] if assembly else result["candidate"]["points"], "#008b75"))
+    # Equal-axis isometric projection; source coordinates are never altered.
+    def project(point):
+        x, y, z = point
+        return ((x-y) / math.sqrt(2), (x+y) / math.sqrt(6) - z * math.sqrt(2/3))
+    all_points = [point for _, points, _ in routes for point in points] + box_vertices(layout["bounds"])
+    projected = [project(point) for point in all_points]
+    low = [min(p[axis] for p in projected) for axis in (0, 1)]
+    high = [max(p[axis] for p in projected) for axis in (0, 1)]
+    scale = min(860/max(high[0]-low[0], 1), 440/max(high[1]-low[1], 1))
+    def xy(point):
+        a, b = project(point)
+        return 70 + (a-low[0])*scale, 65 + (b-low[1])*scale
+    def polyline(points, color, width, dash=""):
+        coords = ' '.join(f'{x:.2f},{y:.2f}' for x, y in map(xy, points))
+        return f'<polyline points="{coords}" fill="none" stroke="{color}" stroke-width="{width}" stroke-linejoin="round" stroke-linecap="round"' + (f' stroke-dasharray="{dash}"' if dash else '') + '/>'
+    parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 590" role="img" aria-label="Printable isometric route comparison">',
+             '<rect width="1000" height="590" fill="white"/>',
+             '<text x="30" y="28" fill="#17334d" font-size="18" font-family="sans-serif">Isometric centerline comparison · dimensions in mm</text>']
+    for obstacle in layout.get("obstacles", []):
+        if obstacle.get("capsules"):
+            for capsule in obstacle["capsules"]:
+                parts.append(polyline([capsule["start"], capsule["end"]], "#b8c3ce", 1))
+        else:
+            vertices = box_vertices(obstacle)
+            for indices in ((0,1,2,3,0), (4,5,6,7,4), (0,4), (1,5), (2,6), (3,7)):
+                parts.append(polyline([vertices[i] for i in indices], "#c4ccd4", 1))
+    for label, points, color in routes:
+        parts.append(polyline(points, color, 3, "7 4" if label == "Original" else ""))
+    for label, point in (("Start", layout["pipe"]["start"]), ("End", layout["pipe"]["end"])):
+        x, y = xy(point)
+        parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="5" fill="#24384d"/><text x="{x+8:.2f}" y="{y-8:.2f}" font-size="14" font-family="sans-serif">{label}</text>')
+    if assembly:
+        for part in assembly.get("components", []):
+            if part.get("kind") != "straight":
+                continue
+            midpoint = [(a+b)/2 for a, b in zip(part["start"], part["end"])]
+            x, y = xy(midpoint)
+            label = html.escape(f"{part['id']}: {part['length_mm']:.1f} mm")
+            parts.append(f'<text x="{x+8:.2f}" y="{y-8:.2f}" fill="#006954" stroke="white" stroke-width="3" paint-order="stroke" font-family="sans-serif" font-size="12">{label}</text>')
+    parts.extend(['<text x="30" y="548" fill="#b96313" font-size="15" font-family="sans-serif">Dashed orange: original</text>',
+                  '<text x="270" y="548" fill="#008b75" font-size="15" font-family="sans-serif">Green: suggested</text>',
+                  '<text x="30" y="574" fill="#45596d" font-size="13" font-family="sans-serif">Centerlines and obstacle references only. Use the 3D model and component schedule for geometric review.</text>', '</svg>'])
+    return ''.join(parts)
+
+
 def make_figure(layout, result):
     layout = display_layout(layout, result)
     figure = go.Figure()
@@ -205,6 +274,14 @@ def make_figure(layout, result):
             add_box(figure, obstacle, "Box envelopes", "#8394ab", 0.55,
                     showlegend=showlegend, legendgroup=kind, hover=hover)
 
+    assembly = accepted_assembly(result)
+    reference_meshes = (result.get("assembly") or {}).get("reference_meshes", [])
+    rounded_reference = (result.get("assembly") or {}).get("reference_representation") == "rounded_baseline"
+    if reference_meshes:
+        reference_label = "Original rounded reference" if rounded_reference else "Original width reference (unfitted)"
+        add_assembly_meshes(figure, reference_meshes, name=reference_label, color="#f5a55b", opacity=.38, group="original-width")
+    if assembly:
+        add_assembly_meshes(figure, assembly.get("meshes", []), name="Rounded pipe proposal", color="#26d2b3", opacity=.92, group="rounded-proposal")
     for key, label, color, dash in (
         ("original", "Original route", "#f5a55b", "dash"),
         ("candidate", "Suggested route", "#26d2b3", "solid"),
@@ -212,10 +289,12 @@ def make_figure(layout, result):
         route = result.get(key)
         if route is None:
             continue
-        points = route["points"]
+        points = assembly["centerline_points"] if key == "candidate" and assembly else route["points"]
+        hide_centerline = (key == "candidate" and assembly) or (key == "original" and rounded_reference)
         figure.add_trace(go.Scatter3d(
             x=[p[0] for p in points], y=[p[1] for p in points], z=[p[2] for p in points],
-            mode="lines+markers", name=label,
+            mode="lines+markers", name=label, visible="legendonly" if hide_centerline else True,
+            legendgroup=key + "-centerline",
             line={"color": color, "width": 7, "dash": dash},
             marker={"size": 3, "color": color},
             hovertemplate=label + "<br>x %{x} mm<br>y %{y} mm<br>z %{z} mm<extra></extra>",
@@ -253,11 +332,28 @@ def make_figure(layout, result):
                "yaxis": {**axis, "title": "y / mm"},
                "zaxis": {**axis, "title": "z / mm"}},
     )
+    if assembly:
+        def visibility(mode):
+            values = []
+            for trace in figure.data:
+                group = trace.legendgroup
+                original_trace = group in ("original-width", "original-centerline")
+                candidate_trace = group in ("rounded-proposal", "candidate-centerline")
+                hidden = (mode == "Before" and candidate_trace) or (mode == "After" and original_trace)
+                values.append(False if hidden else trace.visible if trace.visible is not None else True)
+            return values
+        figure.update_layout(
+            height=620, margin={"l": 5, "r": 5, "t": 90, "b": 5},
+            updatemenus=[{"type": "buttons", "direction": "right", "x": 0, "y": 1.24, "active": 2,
+                          "bgcolor": "#cbd9e8", "bordercolor": "#55dcc8", "font": {"color": "#102035"},
+                          "buttons": [{"label": mode, "method": "update", "args": [{"visible": visibility(mode)}]}
+                                      for mode in ("Before", "After", "Both")]}],
+        )
     return figure
 
 
 def write_dxf(layout, result, destination):
-    """Export centerlines only. This is not a pipe solid or a fitting model."""
+    """Export separate review geometry; never modify a source drawing."""
     layout = display_layout(layout, result)
     synthetic = layout.get("provenance") == "synthetic"
     prefix = "SYNTHETIC" if synthetic else "CAD_DERIVED"
@@ -271,6 +367,30 @@ def write_dxf(layout, result, destination):
         layer = prefix + "_" + key.upper() + "_CENTERLINE"
         document.layers.add(layer, color=color)
         space.add_polyline3d(result[key]["points"], dxfattribs={"layer": layer})
+    assembly = accepted_assembly(result)
+    mesh_groups = [(prefix + "_ORIGINAL_WIDTH_REFERENCE", (result.get("assembly") or {}).get("reference_meshes", []), 30)]
+    if assembly:
+        mesh_groups.append((prefix + "_PROPOSED_PIPE_ENVELOPE", assembly.get("meshes", []), 3))
+        rounded_layer = prefix + "_ROUNDED_CENTERLINE"
+        document.layers.add(rounded_layer, color=3)
+        space.add_polyline3d(assembly["centerline_points"], dxfattribs={"layer": rounded_layer})
+        dimension_layer = prefix + "_PROPOSED_DIMENSIONS"
+        document.layers.add(dimension_layer, color=7)
+        for part in assembly.get("components", []):
+            midpoint = [(a+b)/2 for a, b in zip(part["start"], part["end"])]
+            note = f"{part['id']}: {part['length_mm']:.1f} mm"
+            if part["kind"] == "bend":
+                note += f" arc, R{part['radius_mm']:g}, {part['angle_deg']:g} deg"
+            else:
+                note += " straight geometric cut length"
+            space.add_text(note, dxfattribs={"layer": dimension_layer, "insert": midpoint, "height": max(2, layout["pipe"]["diameter"]*.2)})
+    for layer, meshes, color in mesh_groups:
+        if not meshes:
+            continue
+        document.layers.add(layer, color=color)
+        for mesh in meshes:
+            for face in mesh["faces"]:
+                space.add_3dface([mesh["vertices"][index] for index in face], dxfattribs={"layer": layer})
     if layout.get("protected_endpoints"):
         fixed_layer = prefix + "_FIXED_END_SECTIONS"
         document.layers.add(fixed_layer, color=2)
@@ -302,7 +422,14 @@ def write_dxf(layout, result, destination):
     label = "SYNTHETIC TEST ONLY" if synthetic else "CAD-DERIVED PROTOTYPE REVIEW"
     if layout.get("benchmark", {}).get("synthetic_mutation"):
         label = "CONTROLLED DETOUR TEST. Artificial detour added to CAD-derived geometry"
-    space.add_text(f"{label}. Centerlines in mm. Unverified rules. Source CAD has not been modified.", dxfattribs={"height": max(2, layout["pipe"]["diameter"])})
+    shape_note = (f" Proposed OD {assembly['outer_diameter_mm']:g} mm; centerline bend radius {assembly['bend_radius_mm']:g} mm."
+                  " Rounded proposal meshes are geometric outer envelopes, not verified catalog or fabricated pipe solids.") if assembly else ""
+    if (result.get("assembly") or {}).get("reference_meshes"):
+        shape_note += (" Original rounded reference uses the same geometric radius assumption."
+                       if result["assembly"].get("reference_representation") == "rounded_baseline" else
+                       " Original width reference has unfitted corners.")
+    space.add_text(f"{label}. Centerlines in mm. Unverified rules. Source CAD has not been modified." + shape_note,
+                   dxfattribs={"height": max(2, layout["pipe"]["diameter"]), "insert": layout["bounds"]["min"]})
     document.saveas(destination)
 
 
@@ -314,6 +441,7 @@ def write_html(layout, result, elapsed, destination):
     controlled_detour = benchmark.get("synthetic_mutation") is True
     gravity = layout.get("system_type") == "gravity"
     original, candidate = result["original"], result["candidate"]
+    assembly = accepted_assembly(result)
     def metric(route, key):
         if route is None:
             return "No accepted route"
@@ -323,8 +451,16 @@ def write_html(layout, result, elapsed, destination):
     direction_label = "Sampled direction changes (not fittings)" if not synthetic else "Direction changes"
     rows = "".join(
         f"<tr><th>{label}</th><td>{metric(original, key)}</td><td>{metric(candidate, key)}</td></tr>"
-        for label, key in (("Route length", "length"), (direction_label, "bends"), ("Geometric checks", "valid"))
+        for label, key in (("Search polyline length" if assembly else "Route length", "length"), (direction_label, "bends"), ("Geometric checks", "valid"))
     )
+    if assembly:
+        metrics = assembly.get("metrics", {})
+        baseline = assembly.get("baseline_metrics") or {}
+        for label, key, unit in (("Rounded centerline length", "centerline_length_mm", " mm"),
+                                 ("Rounded bends in geometric proposal", "bend_count", "")):
+            before = (f"{baseline[key]:,.1f}{unit}" if unit else f"{baseline[key]:g}") if key in baseline else "Not assessed as an assembly"
+            after = (f"{metrics[key]:,.1f}{unit}" if unit else f"{metrics[key]:g}") if key in metrics else "Not available"
+            rows += f"<tr><th>{label}</th><td>{before}</td><td>{after}</td></tr>"
     points = "" if candidate is None else "".join(
         "<tr><td>" + str(i + 1) + "</td>" + "".join(f"<td>{value:g}</td>" for value in point) + "</tr>"
         for i, point in enumerate(candidate["points"])
@@ -354,6 +490,12 @@ def write_html(layout, result, elapsed, destination):
         headline = f"{saved:,.0f} mm shorter in this {context}" if saved > 0 else "Route review complete"
     else:
         headline = "No accepted route from this search"
+    if assembly:
+        headline = {"clearance_repair": "Rounded pipe proposal repairs modeled clearance",
+                    "fewer_bends": "Rounded pipe proposal uses fewer bends",
+                    "fewer_elevation_changes": "Rounded pipe proposal uses fewer vertical runs",
+                    "shorter_length": "Shorter rounded pipe proposal",
+                    "unchanged": "Original rounded route retained"}.get(assembly.get("change_type"), "Review pipe proposal")
     provenance_tag = "SYNTHETIC TEST" if synthetic else "CAD-DERIVED REVIEW"
     benchmark_panel = ""
     if controlled_detour:
@@ -389,14 +531,29 @@ def write_html(layout, result, elapsed, destination):
         coverage_text += f" Each segment is checked for downhill flow and the selected minimum slope of {layout['rules']['min_slope']:g} in the start-to-end direction. Positive Z is assumed to point upward."
     else:
         coverage_text += " New pressure route suggestions use axis-aligned segments."
+    if result.get("comparison_objective") == "rounded_bends_elevation_length":
+        coverage_text += " Bounded rounded alternatives are ranked by generated bend count, vertical runs, then rounded centerline length."
     if not synthetic:
-        coverage_text += " Existing CAD centerlines retain their supplied directions and samples. Direction changes are not verified fitting counts. Route comparisons use polyline length only."
+        coverage_text += " Existing CAD centerlines retain their supplied directions and samples. Sampled direction changes are not verified fitting counts."
+        if result.get("comparison_objective") == "rounded_bends_elevation_length":
+            coverage_text += " A verified fitting saving over the original is not established by its polyline samples."
+        else:
+            coverage_text += " Route comparisons use polyline length only."
     if "bend_radius" in layout["rules"]:
-        coverage_text += " Available tangent length is checked against the selected bend radius. Actual curved fitting volumes are not checked."
+        coverage_text += (" Rounded outer envelopes are checked conservatively against the supplied obstacles. Catalog and fabrication suitability remain unverified." if assembly else
+                          " Available tangent length is checked against the selected bend radius. Actual curved fitting volumes are not checked.")
     source_units = escape(str(result.get("input_units", layout["units"])))
     export_text = "synthetic centerlines and obstacle outlines" if synthetic else "CAD-derived review centerlines and the supplied obstacle outlines"
     if any(item.get("capsules") for item in layout["obstacles"]):
         export_text = "review centerlines, box outlines and labeled envelope axes with their radii. Envelope axes are not physical pipes"
+    if assembly:
+        export_text += ", plus separate rounded proposal meshes, a rounded centerline and component length labels"
+    print_plot = print_route_svg(layout, result)
+    reference_caption = ("Orange shows the rounded original reference using the same geometric radius assumption."
+                         if (result.get("assembly") or {}).get("reference_representation") == "rounded_baseline" else
+                         "Orange shapes are an unfitted original width reference.")
+    plot_caption = ("Green rounded shapes show the proposed outer envelope at the selected diameter. " + reference_caption
+                    if assembly else "The collision check also accounts for pipe thickness.")
     content = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pipe route review</title>
@@ -418,20 +575,36 @@ thead th {{ color: #afbed0 }}
 li {{ margin-bottom: 10px }}
 a {{ color: #55dcc8 }}
 .plot {{ overflow: hidden; padding: 10px }}
+.print-figure {{ display: none }}
+.print-figure svg {{ width: 100%; height: auto }}
 .pill {{ display: inline-block; background: #24354b; padding: 4px 10px; border-radius: 7px }}
 @media(max-width: 760px) {{ .columns {{ grid-template-columns: 1fr }} .panel {{ padding: 16px }} }}
+@media print {{
+  body {{ background: white; color: #132c43 }}
+  main {{ max-width: none; padding: 0 }}
+  .panel {{ background: white; border-color: #8090a0; padding: 12px; border-radius: 0 }}
+  .muted, thead th {{ color: #354c61 }}
+  .plot {{ display: none }}
+  .print-figure {{ display: block; break-inside: avoid }}
+  .columns {{ display: block }}
+  a {{ color: #006858 }}
+  tr {{ break-inside: avoid }}
+}}
 </style></head><body><main>
 <span class="tag">TRACK 2 / {provenance_tag}</span>
 <h1>{headline}</h1>
 <p>{escape(layout.get('name', 'Pipe layout'))}. {provenance_text} {rule_text} This report does not certify compliance with engineering standards.</p>
 <p class="muted">{system_text}. Fixed connections. Same {layout['pipe']['diameter']:g} mm outer diameter. Selected clearance {layout['rules']['clearance']:g} mm. Declared input units {source_units}. This report uses millimeters.</p>
+<p><a href="#route-view">View 3D comparison</a> &nbsp; <a href="route-review.xlsx">Download Excel review</a></p>
 {benchmark_panel}
 <div class="panel"><table><thead><tr><th>Measure</th><th>Original</th><th>Suggested</th></tr></thead><tbody>{rows}</tbody></table>
-<p class="muted">{coverage_text}</p></div>
+<details><summary>What this comparison checks</summary><p class="muted">{coverage_text}</p></details></div>
 {diagnostics}
-{challenge_panel(result)}
+{assembly_panel(result)}
 <div class="panel plot">{plot}</div>
-<p class="muted">Drag to rotate. Click a legend item to hide it. Lines show pipe centers. The collision check also accounts for pipe thickness.</p>
+<div class="panel print-figure">{print_plot}</div>
+<p class="muted">Drag to rotate. Click a legend item to hide it. Lines show pipe centers. {plot_caption}</p>
+{challenge_panel(result)}
 <div class="columns"><section class="panel"><h2>Check results</h2>{issues}
 <p>These checks do not confirm fitting availability or hydraulic performance. Every corner and connection still needs designer review.</p>
 <p class="muted">{escape(result['search']['reason'])}</p>
@@ -441,9 +614,19 @@ a {{ color: #55dcc8 }}
 <section class="panel"><h2>Assumptions used in this review</h2><ul>{assumption_list}</ul></section>
 <section class="panel"><h2>What still needs work</h2><ul>{limitation_list}</ul>
 <p>Review the source geometry and unit assumptions before interpreting real dimensions. {rule_text}</p></section>
-<p><a href="result.json">Full result and inputs</a> &nbsp; <a href="route-centerlines.dxf">Centerlines for CAD review</a></p>
+<p><a href="result.json">Full result and inputs</a> &nbsp; <a href="route-centerlines.dxf">{'Proposal geometry for CAD review' if assembly else 'Centerlines for CAD review'}</a> &nbsp; <a href="route-review.xlsx">Download Excel review</a></p>
 <p class="muted">The DXF contains {export_text}. It does not modify the source ship drawing or contain finished pipe solids and fittings. The report works offline.</p>
-</main></body></html>"""
+</main><script>
+let printDetails = [];
+window.addEventListener('beforeprint', () => {{
+  printDetails = Array.from(document.querySelectorAll('details')).map(item => [item, item.open]);
+  printDetails.forEach(([item]) => {{ item.open = true; }});
+}});
+window.addEventListener('afterprint', () => {{
+  printDetails.forEach(([item, open]) => {{ item.open = open; }});
+  printDetails = [];
+}});
+</script></body></html>"""
     destination.write_text(content, encoding="utf-8")
 
 

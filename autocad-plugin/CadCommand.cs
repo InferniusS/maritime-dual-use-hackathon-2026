@@ -191,6 +191,12 @@ public sealed partial class PreviewCommand
             var rules = layout["rules"] as JsonObject ?? throw new InvalidOperationException("Prepared layout has no rules.");
             rules["grid_step"] = grid;
             if (system == "Gravity") rules["min_slope"] = slope;
+            if (system == "Pressure")
+            {
+                var diameter = Number(layout["pipe"]!, "diameter");
+                if (!AskNumber(editor, "Proposed bend centerline radius in mm (review assumption)", Math.Max(304.8, 1.5 * diameter), false, out var radius)) return;
+                layout["proposal"] = new JsonObject { ["mode"] = "rounded_pipe", ["bend_radius_mm"] = radius };
+            }
             RunAndReview(document, client, layout, scale, metadata.fingerprint, snapshotHash);
         }
         catch (System.Exception exception)
@@ -217,8 +223,9 @@ public sealed partial class PreviewCommand
     private static void CheckService(HttpClient client)
     {
         var json = SendServiceJson(client, HttpMethod.Get, "/api/health");
-        if (json["capabilities"] is not JsonArray capabilities || !capabilities.Any(value => value?.GetValue<string>() == "challenge_rules_v3"))
-            throw new InvalidOperationException("Update and restart the Python service. This plugin needs challenge_rules_v3 support.");
+        if (json["capabilities"] is not JsonArray capabilities || !capabilities.Any(value => value?.GetValue<string>() == "challenge_rules_v3") ||
+            !capabilities.Any(value => value?.GetValue<string>() == "rounded_pipe_proposal"))
+            throw new InvalidOperationException("Update and restart the Python service. This plugin needs challenge_rules_v3 and rounded_pipe_proposal support.");
         if (Text(json, "service") != "maritime-pipe-router" || Number(json, "api_version") != 1 || Text(json, "units") != "mm")
             throw new InvalidOperationException("The local service is not a compatible Maritime optimizer. Update and restart the Python service.");
     }
@@ -288,7 +295,7 @@ public sealed partial class PreviewCommand
     }
 
     private static void RunAndReview(Document document, HttpClient client, JsonObject layout,
-        double drawingScale, string fingerprint, string? snapshotHash = null)
+        double drawingScale, string fingerprint, string? snapshotHash = null, bool demo = false)
     {
         var editor = document.Editor;
         editor.WriteMessage("\nChecking the original route and searching for a replacement locally.");
@@ -337,6 +344,12 @@ public sealed partial class PreviewCommand
             editor.WriteMessage("\nNo checked replacement was found by this search. Other routes may exist.");
             WriteIssues(editor, originalRecord["issues"]);
             if (result["search"]?["reason"] is JsonValue reason) editor.WriteMessage($"\n{reason.GetValue<string>()}");
+            if (result["assembly"] is JsonObject rejectedAssembly)
+            {
+                editor.WriteMessage("\nNo accepted rounded physical proposal is available.");
+                WriteIssues(editor, rejectedAssembly["findings"]);
+            }
+            if (demo && ShowRejectedDemo(document, normalized, result)) return;
             ShowComparedPreview(document, baseline.Select(point => Scale(point, drawingScale)).ToList(), null,
                 "Cyan is the original route. No replacement has been accepted.", false, null);
             return;
@@ -351,7 +364,7 @@ public sealed partial class PreviewCommand
         var originalLength = Number(originalRecord, "length");
         var suggestedLength = Number(candidate, "length");
         if (status == "unchanged") editor.WriteMessage("\nThe original route was retained. This search found no better checked route.");
-        else editor.WriteMessage($"\nSuggested length: {suggestedLength:0.###} mm. Length change: {suggestedLength - originalLength:+0.###;-0.###;0} mm.");
+        else editor.WriteMessage($"\nSuggested design-line length: {suggestedLength:0.###} mm. Design-line length change: {suggestedLength - originalLength:+0.###;-0.###;0} mm. Rounded pipe length is reported separately when available.");
         editor.WriteMessage("\nThis is a checked centerline suggestion under the selected geometry rules. Review the V3 findings and missing evidence in the report. It is not a fitted pipe model or a compliance certificate.");
         var record = new JsonObject
         {
@@ -360,6 +373,21 @@ public sealed partial class PreviewCommand
             ["status"] = status,
             ["result_url"] = reply["exports"]?["json"]?.DeepClone()
         };
+        if (result["assembly"] is JsonObject assembly)
+        {
+            if (assembly["status"]?.GetValue<string>() == "ready")
+            {
+                var display = demo ? "3D" : AskKeyword(editor, "Review output", ["3D", "Centerline"], "3D");
+                if (display is null) return;
+                if (display == "3D" && ShowAssemblyReview(document, normalized, result, points, drawingScale, record, demo)) return;
+            }
+            else
+            {
+                editor.WriteMessage("\nNo accepted rounded physical proposal is available. A centerline alone is not a fitted pipe assembly.");
+                WriteIssues(editor, assembly["findings"]);
+            }
+        }
+        if (demo) editor.WriteMessage("\nNo 3D comparison was saved. See the report for the blocked physical checks.");
         ShowComparedPreview(document, baseline.Select(point => Scale(point, drawingScale)).ToList(),
             points.Select(point => Scale(point, drawingScale)).ToList(),
             "Cyan is the original centerline. Green is the checked suggestion.", status == "improved", record);

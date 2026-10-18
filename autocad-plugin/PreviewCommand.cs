@@ -134,6 +134,12 @@ public sealed partial class PreviewCommand
         }
 
         var editor = document.Editor;
+        if (!document.Database.TileMode)
+        {
+            editor.WriteMessage("\nRun MARITIMEOPTIMIZE in the Model tab. Paper-space routes are not supported.");
+            return;
+        }
+        editor.WriteMessage("\nPressure-pipe centerline workflow. Select all surrounding obstacles that this local check must avoid. Entered prototype rules do not establish V3 compliance.");
         var routeSelection = editor.GetSelection(new PromptSelectionOptions
         {
             MessageForAdding = "\nSelect the connected route entities to optimize (LINE or straight polyline): "
@@ -261,6 +267,13 @@ public sealed partial class PreviewCommand
             using var client = CreateClient();
             CheckService(client);
             var requestLayout = JsonSerializer.SerializeToNode(layout)!.AsObject();
+            var rounded = AskKeyword(editor, "Create a rounded 3D pressure-pipe proposal", ["Yes", "No"], "Yes");
+            if (rounded is null) return;
+            if (rounded == "Yes")
+            {
+                if (!AskNumber(editor, "Proposed bend centerline radius in mm (review assumption)", Math.Max(304.8, 1.5 * diameter * scaleToMillimeters), false, out var radius)) return;
+                requestLayout["proposal"] = new System.Text.Json.Nodes.JsonObject { ["mode"] = "rounded_pipe", ["bend_radius_mm"] = radius };
+            }
             RunAndReview(document, client, requestLayout, scaleToMillimeters, document.Database.FingerprintGuid.ToString());
         }
         catch (HttpRequestException exception)

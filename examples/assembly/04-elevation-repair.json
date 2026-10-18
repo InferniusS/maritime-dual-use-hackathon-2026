@@ -1,0 +1,256 @@
+{
+  "name": "Cross a full-width equipment bank above its roof",
+  "provenance": "synthetic",
+  "units": "mm",
+  "system_type": "pressurized",
+  "rule_profile": "fmg-v3",
+  "proposal": {
+    "mode": "rounded_pipe",
+    "bend_radius_mm": 304.8
+  },
+  "bounds": {
+    "min": [
+      0,
+      0,
+      0
+    ],
+    "max": [
+      10000,
+      7000,
+      4500
+    ]
+  },
+  "rules": {
+    "clearance": 50.8,
+    "grid_step": 250,
+    "bend_penalty": 600
+  },
+  "pipe": {
+    "diameter": 168.3,
+    "start": [
+      600,
+      1200,
+      1000
+    ],
+    "end": [
+      9400,
+      1200,
+      1000
+    ],
+    "original_route": [
+      [
+        600,
+        1200,
+        1000
+      ],
+      [
+        850,
+        1200,
+        1000
+      ],
+      [
+        9150,
+        1200,
+        1000
+      ],
+      [
+        9400,
+        1200,
+        1000
+      ]
+    ]
+  },
+  "obstacles": [
+    {
+      "id": "equipment-bank",
+      "min": [
+        3000,
+        0,
+        0
+      ],
+      "max": [
+        4500,
+        7000,
+        2400
+      ]
+    },
+    {
+      "id": "pump-bank",
+      "min": [
+        6000,
+        1700,
+        0
+      ],
+      "max": [
+        7600,
+        3500,
+        2300
+      ]
+    },
+    {
+      "id": "overhead-duct",
+      "min": [
+        2000,
+        3600,
+        3300
+      ],
+      "max": [
+        8500,
+        4200,
+        4000
+      ]
+    },
+    {
+      "id": "structure-column",
+      "min": [
+        1600,
+        2500,
+        0
+      ],
+      "max": [
+        1950,
+        2900,
+        4500
+      ]
+    },
+    {
+      "id": "service-cabinet",
+      "min": [
+        7900,
+        200,
+        0
+      ],
+      "max": [
+        8500,
+        800,
+        1800
+      ]
+    },
+    {
+      "id": "existing-pipe-2000",
+      "min": [
+        1000,
+        3050,
+        1925
+      ],
+      "max": [
+        9000,
+        3200,
+        2075
+      ],
+      "capsules": [
+        {
+          "start": [
+            1075,
+            3125,
+            2000
+          ],
+          "end": [
+            8925,
+            3125,
+            2000
+          ],
+          "radius": 75
+        }
+      ]
+    },
+    {
+      "id": "existing-pipe-2400",
+      "min": [
+        1000,
+        3050,
+        2325
+      ],
+      "max": [
+        9000,
+        3200,
+        2475
+      ],
+      "capsules": [
+        {
+          "start": [
+            1075,
+            3125,
+            2400
+          ],
+          "end": [
+            8925,
+            3125,
+            2400
+          ],
+          "radius": 75
+        }
+      ]
+    },
+    {
+      "id": "existing-pipe-2800",
+      "min": [
+        1000,
+        3050,
+        2725
+      ],
+      "max": [
+        9000,
+        3200,
+        2875
+      ],
+      "capsules": [
+        {
+          "start": [
+            1075,
+            3125,
+            2800
+          ],
+          "end": [
+            8925,
+            3125,
+            2800
+          ],
+          "radius": 75
+        }
+      ]
+    }
+  ],
+  "assumptions": [
+    "Synthetic equipment-room stress test; not an organizer ship drawing or a hidden evaluation file.",
+    "The supplied rectangular room is the allowed space. Only listed obstacles are modeled.",
+    "Outer diameter is fixed. A 304.8 mm centerline bend radius is a geometric assumption, not a verified vendor fitting.",
+    "Compare rounded bend count, vertical runs, then length. No fitting catalog, pressure calculation, or complete engineering approval is claimed."
+  ],
+  "protected_endpoints": [
+    {
+      "endpoint": "start",
+      "points": [
+        [
+          600,
+          1200,
+          1000
+        ],
+        [
+          850,
+          1200,
+          1000
+        ]
+      ],
+      "max_distance": 250,
+      "obstacle_ids": []
+    },
+    {
+      "endpoint": "end",
+      "points": [
+        [
+          9150,
+          1200,
+          1000
+        ],
+        [
+          9400,
+          1200,
+          1000
+        ]
+      ],
+      "max_distance": 250,
+      "obstacle_ids": []
+    }
+  ]
+}

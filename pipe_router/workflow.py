@@ -47,6 +47,12 @@ def normalize_layout(layout: dict) -> dict:
     """
     core._mapping(layout, "layout")
     result = deepcopy(layout)
+    if "proposal" in result:
+        proposal = core._mapping(result["proposal"], "proposal")
+        if proposal.get("mode") != "rounded_pipe":
+            raise ValueError("proposal.mode must be rounded_pipe")
+        if "bend_radius_mm" in proposal:
+            core._number(proposal["bend_radius_mm"], "proposal.bend_radius_mm", positive=True)
     source_units = result.get("units", "mm")
     if not isinstance(source_units, str) or source_units not in UNIT_SCALE:
         raise ValueError("units must be mm, m, or in")
@@ -130,7 +136,7 @@ def normalize_layout(layout: dict) -> dict:
         if record["max_distance"] > MAX_ENDPOINT_STUB_MM:
             raise ValueError(f"Endpoint contact assumptions are limited to {MAX_ENDPOINT_STUB_MM:g} mm")
         identifiers = record.get("obstacle_ids")
-        if not isinstance(identifiers, list) or not identifiers or not all(isinstance(item, str) and item in obstacle_ids for item in identifiers):
+        if not isinstance(identifiers, list) or not all(isinstance(item, str) and item in obstacle_ids for item in identifiers):
             raise ValueError("Protected endpoint obstacle_ids must name existing obstacles")
         if any(not _connection_obstacle_allowed(result, identifier) for identifier in identifiers):
             raise ValueError("Protected access or structure obstacles cannot be treated as pipe connections")
@@ -700,13 +706,21 @@ def run_workflow(layout: dict) -> dict:
             raise ValueError("For routing, reverse the route points so flow is start_to_end. Rebind any engineering measurements to that order.")
     result = _run_geometry_workflow(supplied)
     result["input_units"] = layout.get("units", "mm")
+    if supplied.get("proposal", {}).get("mode") == "rounded_pipe":
+        from .proposal import add_pipe_proposal
+        result = add_pipe_proposal(result)
     if profile != "fmg-v3":
         return result
     from .challenge_rules import assess_layout
     normalized = result["normalized_layout"]
     baseline = assess_layout(normalized, result["original"]["points"])
-    candidate = assess_layout(normalized, result["candidate"]["points"]) if result.get("candidate") else None
-    for assessment, record in ((baseline, result["original"]), (candidate, result.get("candidate"))):
+    candidate_geometry = result.get("candidate")
+    if candidate_geometry and result.get("assembly", {}).get("status") == "ready":
+        # Old measurements bind to actual physical geometry, not to the sharp
+        # construction vertices from which new circular fillets were made.
+        candidate_geometry = {**candidate_geometry, "points": result["assembly"]["centerline_points"]}
+    candidate = assess_layout(normalized, candidate_geometry["points"]) if candidate_geometry else None
+    for assessment, record in ((baseline, result["original"]), (candidate, candidate_geometry)):
         if assessment is None:
             continue
         context = normalized.get("model_context", {})
@@ -728,6 +742,10 @@ def run_workflow(layout: dict) -> dict:
         result["challenge_review"]["rejected_candidate"] = deepcopy(candidate)
         result["candidate"] = None
         result["status"] = "no_route"
+        if result.get("assembly"):
+            result["assembly"]["status"] = "blocked"
+            result["assembly"]["meshes"] = []
+            result["assembly"]["findings"].append({"code": "mandatory_challenge_failure", "status": "fail", "message": "A mandatory V3 finding prevents acceptance of this proposal"})
         result["search"]["reason"] = "The geometric candidate failed a mandatory V3 check. See the challenge findings. No replacement was accepted."
     result["assumptions"] = [a for a in result["assumptions"] if a != "Selected rules are an unverified prototype profile, not an official engineering standard."]
     result["assumptions"].append("V3 values come from the supplied challenge brief. Evidence coverage and engineering suitability are not automatically verified.")

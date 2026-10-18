@@ -1,5 +1,6 @@
 # Run the project on the Snapdragon laptop
 
+**Latest build:** follow the [3D proposal update and demo guide](3d-demo-snapdragon.md) after the base setup. It adds a bend-radius prompt, rounded geometry and new comparison commands. The detailed centerline walkthrough below records the earlier flow.
 AutoCAD 2027 is already installed on the event laptop. The setup photo also shows Python 3.14.8 working. Use the included plugin DLL. You do not need to install the .NET SDK or Visual Studio for these steps.
 
 AutoCAD and the Python routing service run on this same laptop. The Mac and IQ9 board do not need to be connected.

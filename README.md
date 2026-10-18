@@ -2,32 +2,34 @@
 
 We picked Track 2. We are building a tool that checks existing ship piping and suggests better routes while keeping pipe sizes and connection points fixed.
 
-**Current status on October 17:** the team saved a real cooling-drawing suggestion inside AutoCAD on the Snapdragon. The new [standards and model context iteration](docs/standards-iteration.md) adds V3 rule findings, 50.8 mm Challenge clearance, reviewed surrounding models and an Excel review workbook. Its Mac checks and plugin build passed. The new features still need a live Snapdragon check. The browser remains a fallback.
+**Current status:** the team has run the AutoCAD plugin and V3 Challenge report on the Snapdragon. The new [3D pipe proposal iteration](docs/assembly-iteration.md) adds visible pipe-width geometry with rounded bends, a before/after toggle, dimension labels and a geometric component schedule. Five controlled examples passed on the Mac. The new 3D commands still need a live Snapdragon run. The browser and earlier centerline workflow remain available.
 
 ## Start with AutoCAD
 
-**At the venue start with the [Snapdragon guide](docs/snapdragon-guide.md).** If your setup already works use its update steps first. This milestone changes the Python checks, examples, reports and plugin. Replacing only `run_web.py` is not enough.
+**At the venue start with the [3D demo guide](docs/3d-demo-snapdragon.md).** It gives the update commands and exact AutoCAD steps. Use the [full setup guide](docs/snapdragon-guide.md) for a fresh installation. This milestone changes the Python checks, examples, reports and plugin. Replacing only `run_web.py` is not enough.
 
 The [plugin guide](autocad-plugin/README.md) explains the commands and optional source build. The short version is:
 
 1. Download or clone this repo on the AutoCAD laptop.
 2. Install the Python environment and start the local service.
 3. Load `autocad-plugin/prebuilt/Maritime.AutoCAD.dll` through `NETLOAD` in AutoCAD 2027 for Windows. Rebuilding from source is also supported.
-4. Run `MARITIMECAD` to select a pipe solid or block from the drawing. Choose a detected route and review the result inside AutoCAD.
+4. For the visible demo, create an empty drawing and run `MARITIMEDEMO` with `examples/assembly/01-congested-room.json`. For a real drawing, run `MARITIMECAD` to select a pipe solid or block, then review the chosen route.
 
 The Python service runs on the same laptop. You do not need to open the website or upload the drawing through a browser. AutoCAD sends a temporary DXF snapshot to the local service.
 
-`MARITIMEPREVIEW` and `MARITIMEOPTIMIZE` remain available for simple line and polyline tests. The new drawing workflow can also save a suggestion as a separate review centerline. It does not replace the original pipe solids.
+`MARITIMEVIEW` switches saved review layers between Original, Proposal and Both. `MARITIMEPREVIEW` and `MARITIMEOPTIMIZE` remain available for line and polyline tests; the latter can also request a rounded pressure-pipe proposal. Saved proposals are separate review geometry. They do not replace the source pipe solids.
 
 ## What this iteration adds
 
-`MARITIMECAD` now offers a **Challenge** profile based on the V3 brief. It defaults to 50.8 mm shock clearance and reports passes, failures, preferences and missing evidence. Directional drain checks use declared ship axes and flow. `MARITIMECONTEXT` loads reviewed surrounding geometry, permitted spaces and optional engineering evidence for the active drawing session.
+The earlier iteration saved a thin green centerline. This one can generate straight pipe envelopes and circular bends at the selected outside diameter. It rejects rounding that cannot fit the fixed ends or supplied surroundings. It compares bounded alternatives by rounded bend count, vertical runs, then rounded length.
 
-Manufacturing and access findings use explicit evidence tied to a route. They do not automatically identify parts from the CAD model. The Excel review contains findings and coordinates. It is not yet a complete manufactured parts list.
+The new controlled congested-room example changes from about **17.0767 m and four rounded bends** to **13.4199 m and two rounded bends**, with fixed connections preserved. It is labeled synthetic: the source drawing was not secretly damaged or presented as having that defect. Other cases cover a collision repair, a blocked search, an elevation change and an unchanged valid route.
 
-Eight public examples passed their expected valid, repaired and blocked outcomes. At 50.8 mm clearance the real DB1 replay returned a checked 2558 mm suggestion for its 2413.467 mm original. The joined route stayed unchanged at about 3679.248 mm. These are local geometric results with outstanding engineering review items.
+The HTML report, DXF and Excel review now include rounded geometry or component dimensions. Printed reports include a static diagram so the 3D browser plot does not disappear from the PDF. These are **geometric proposals**, not approved catalog fittings or a complete manufactured bill of materials.
 
-Read [what changed, how to test it and what remains](docs/standards-iteration.md). Keep AutoCAD as the main application. Navisworks is optional for combined-model review and does not replace the missing routing or engineering checks.
+The V3 Challenge profile, 50.8 mm minimum clearance and `MARITIMECONTEXT` support remain. The team's latest Snapdragon report confirms that the Challenge profile ran. Additional context loading and complete engineering checks are separate tasks.
+
+Read [what changed, measured results and what remains](docs/assembly-iteration.md). Keep AutoCAD as the main application. Navisworks remains optional for combined-model review; the [earlier assessment](docs/standards-iteration.md#navisworks-decision) explains why switching does not supply the remaining routing or engineering logic.
 
 ## See the saved result without installing anything
 
@@ -49,7 +51,7 @@ The screenshot shows the full CAD background. The saved HTML shows one selected 
 
 The search removes about 451 mm of the added detour. The untouched CAD baseline is still shorter. This is a recovery test rather than evidence that we improved the supplied design. It uses an assumed 50 mm clearance.
 
-This saved example is from the earlier box-based iteration. The latest standards tests are recorded in [the current iteration](docs/standards-iteration.md). This older example retains its original unit and rule assumptions. Passing the implemented checks does not establish official engineering compliance.
+This saved example is from the earlier box-based iteration. The latest [3D proposal iteration](docs/assembly-iteration.md) has its own controlled examples and measurements. This older example retains its original unit and rule assumptions. Passing the implemented checks does not establish official engineering compliance.
 
 ## Start the Python service
 
@@ -107,7 +109,7 @@ Efe's Mac is already set up and only needs the second command. If Python is not 
 
 Keep the terminal running. The plugin uses [http://127.0.0.1:8767/](http://127.0.0.1:8767/) on the same computer. That address will not connect to Efe's Mac from the venue. A browser is optional when using the plugin.
 
-The local service and real drawing Save have run on the Snapdragon laptop. The new Challenge profile and context workflow still need their venue test. Create the environment on each laptop instead of copying the Mac's `.venv`.
+The local service, real drawing Save and Challenge report have run on the Snapdragon laptop. The new 3D commands and a reviewed context file still need their venue test. Create the environment on each laptop instead of copying the Mac's `.venv`.
 
 ## Browser fallback
 
@@ -123,17 +125,21 @@ Original organizer files stay outside Git. Get those from [the organizer Drive f
 
 ## What comes next
 
-1. Update Python files and the DLL together on the Snapdragon. Run the eight challenge checks and test the new Challenge profile, context loading and reports.
-2. Verify actual components and physical fitting shapes. Use meaningful bend and elevation objectives.
-3. Preserve branches, equipment connections and required spaces across longer sections.
-4. Verify the aligned surrounding models and access areas on real drawings.
-5. Produce manufactured assembly changes and the final Excel parts list. Demonstrate held-out valid and damaged cases across systems.
+1. Update Python files and the DLL together on the Snapdragon. Run `scripts/check_assembly.py`, then rehearse the new AutoCAD comparison, Save and Undo using the [3D demo guide](docs/3d-demo-snapdragon.md).
+2. Confirm actual component identities, port orientations, nominal sizes and suitable catalog parts. The new rounded envelope checks do not establish manufacturing approval.
+3. Preserve branches, valves and required spaces across longer connected sections. The current optimizer handles one selected non-branching route at a time.
+4. Verify the complete aligned surroundings and access areas on real drawings. Missing structure or other systems remain unchecked.
+5. Complete fabrication, installation and system-function checks and the final parts list. Test held-out valid and damaged cases across systems.
+
+The current deliverable is a routing and review prototype with a defined demo. It is not yet a complete engineering solution for every unseen ship model. The [demo readiness assessment](docs/demo-readiness.md) separates measured claims from remaining work.
 
 The Mac is our development machine. The Snapdragon laptop is the AutoCAD demo target. The algorithm searches possible routes and does not learn from uploaded drawings. No IQ9 service or AI processor integration is included. IQ9 is not needed for this current workflow.
 
 ## Project notes
 
 - [Snapdragon setup one step at a time](docs/snapdragon-guide.md)
+- [New 3D demo steps on Snapdragon](docs/3d-demo-snapdragon.md)
+- [3D proposal iteration and remaining work](docs/assembly-iteration.md)
 - [AutoCAD plugin setup and commands](autocad-plugin/README.md)
 - [Team handoff and next tasks](docs/team-handoff.md)
 - [Standards iteration and Navisworks assessment](docs/standards-iteration.md)
@@ -144,7 +150,7 @@ The Mac is our development machine. The Snapdragon laptop is the AutoCAD demo ta
 - [Units and rule assumptions](docs/assumptions.md)
 - [Packages and setup details](docs/dependencies.md)
 
-Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows. Real drawing Save is confirmed on the demo laptop. The new standards/context workflow and an explicit Undo check still need live verification.
+Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -m pytest -q` on Windows. The five new demo scenarios run with `scripts/check_assembly.py`. Real drawing Save and the Challenge report are confirmed on the demo laptop. The new 3D comparison, context loading and an explicit Undo check still need live verification.
 
 ## Team
 
@@ -157,4 +163,4 @@ Run tests with `.venv/bin/python -m pytest -q` on Mac or `.venv\Scripts\python -
 
 Codex generated the initial README and `.gitignore` before challenge implementation. During the event Codex generated the initial prototype code in `pipe_router/` and `web/` along with the scripts and examples and tests. Codex also helped extend the AutoCAD integration and write this documentation. All initial code in those new prototype files was AI generated. The exact model build was not recorded.
 
-Automated validation has run on the Mac. The simple line Save and real drawing Save have run on the Snapdragon laptop. The latest standards/context update and final CAD comparison still need venue review. IQ9 execution remains unverified. Keep recording AI assistance as the project grows.
+Automated validation has run on the Mac. The simple line Save, real drawing Save and V3 Challenge report have run on the Snapdragon laptop. The latest rounded geometry and final CAD comparison still need venue review. IQ9 execution remains unverified. Keep recording AI assistance as the project grows.

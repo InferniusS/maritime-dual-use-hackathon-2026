@@ -37,7 +37,11 @@ def main():
     parser.add_argument("--output", type=Path, default=ROOT / "data/generated/real-route-checks")
     parser.add_argument("--rule-profile", choices=("prototype-unverified", "fmg-v3"), default="prototype-unverified")
     parser.add_argument("--context", type=Path, help="JSON model context and optional engineering evidence")
+    parser.add_argument("--rounded-pipe", action="store_true", help="Search and check a full-width rounded pressure-pipe proposal")
+    parser.add_argument("--bend-radius-mm", type=float, help="Explicit geometric radius for --rounded-pipe; catalog suitability remains unverified")
     args = parser.parse_args()
+    if args.bend_radius_mm is not None and not args.rounded_pipe:
+        parser.error("--bend-radius-mm requires --rounded-pipe")
     context_record = json.loads(args.context.read_text()) if args.context else {}
     extra = {"rule_profile": args.rule_profile}
     if context_record:
@@ -61,6 +65,10 @@ def main():
                "import_seconds": import_seconds, "cases": []}
 
     def check(case, label, folder):
+        if args.rounded_pipe:
+            case["proposal"] = {"mode": "rounded_pipe"}
+            if args.bend_radius_mm is not None:
+                case["proposal"]["bend_radius_mm"] = args.bend_radius_mm
         tick = time.perf_counter()
         result = run_workflow(case)
         result["runtime_seconds"] = time.perf_counter() - tick
@@ -73,6 +81,8 @@ def main():
         entry = {"candidate": label, "case_folder": str(folder.relative_to(run_folder)), "status": result["status"], "original_length_mm": result["original"]["length"],
                  "original_valid": result["original"]["valid"], "candidate_length_mm": result["candidate"]["length"] if result["candidate"] else None,
                  "search": result["search"], "checks": result["checks"], "routing_seconds": result["runtime_seconds"]}
+        if result.get("assembly"):
+            entry["assembly"] = {key: result["assembly"].get(key) for key in ("status", "change_type", "metrics", "search")}
         summary["cases"].append(entry)
         print(json.dumps(entry), flush=True)
         return result

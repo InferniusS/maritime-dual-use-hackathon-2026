@@ -369,7 +369,7 @@ def _shock(layout: dict, points: list) -> dict:
         seen.add(endpoint)
         stub = _points(record.get("points"), "protected endpoint points")
         identifiers = record.get("obstacle_ids")
-        if not isinstance(identifiers, list) or not identifiers or any(not isinstance(item, str) or item not in {shape.id for shape in shapes} for item in identifiers):
+        if not isinstance(identifiers, list) or any(not isinstance(item, str) or item not in {shape.id for shape in shapes} for item in identifiers):
             raise ValueError("protected endpoint obstacle_ids must name supplied obstacles")
         maximum = _number(record.get("max_distance"), "protected endpoint max_distance", positive=True)
         if maximum > 1000 or sum(math.dist(a, b) for a, b in zip(stub, stub[1:])) > maximum + LENGTH_TOLERANCE_MM:
